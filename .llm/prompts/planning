@@ -1,0 +1,33 @@
+Prompt 1
+
+Our goal is to create a scalable python package for anomaly detection and classification of geochemical data. We will use uv for dependency management, GeoPandas for data exploration, MLFlow for training, and Keras with Tensorflow for model development.
+
+Create a plan for the package that can handle the sample datasets under /data/gvirm and can scale to large datasets. We want to develop two anomaly detection approaches, using Isolation Forest and using a spatial autoencoder that will sample regions of our dataset. We want to develop a classifier that can recognize rare classes. For both ML tasks (anomaly detection and classification) we will use multiple measures of success, but ultimately would like to maximize PR-AUC (precision recall area under curve).
+
+In your plan, include a proposed project structure as well as an approach for measuring performance and visualizing results.
+
+Prompt 2 (implement plan)
+
+Prompt 3
+
+This is a great start. Let's make some small changes before moving forward.
+1. Rather than change source data, make a copy from the output of data cleansing and processing scripts.
+2. All generated plot images should be output to an output folder that contains subfolders organized by the mlruns to track the model that was used to make it. Change the default save_path accordingly.
+3. Create a Makefile that contains targets for: creating the virtual environment necessary to run the models, training models, and testing models. Consider other useful make targets and add those as well.
+
+(Part of output: make workflow suggestion:
+
+make install
+make preprocess
+make train-all
+make mlflow-ui
+)
+
+Prompt 4
+
+Here are some more small changes to implement:
+1. Processed data should retain the source data structure, ie: process data under ./data/gvirm to ./data/processed/gvirm
+2. Change the top level folder from anomaly_detection to geochem_detect and src/geochem to src/geochem_detect
+3. Check make targets and ensure they all execute paths that exist. Ie, do not create a test target if the project does not have tests.
+4. Add make targets and necessary code to specify a trained model and run it against test data. This ask includes making sure we track train/validate/test splits for each trained model. We want the option to run models against a full dataset (whether it is the dataset the model was trained on or not) or any/all splits of the data that was involved in training that model.
+

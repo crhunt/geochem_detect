@@ -10,7 +10,7 @@ DATA_PATH  ?=
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv install preprocess \
+.PHONY: help venv install preprocess preprocess-spatial preprocess-all \
         train-iforest train-autoencoder train-classifier train-all \
         predict-train predict-val predict-test predict-all predict-full \
         lint format \
@@ -30,8 +30,15 @@ install: venv ## Install all dependencies including dev extras
 	uv sync --extra dev
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-preprocess: ## Cleanse raw data → data/processed/gvirm/  (run before training)
-	$(PYTHON) scripts/preprocess_data.py
+preprocess: ## Preprocess default dataset (multiclass_clean.csv, non-spatial)
+	DATA_PATH=data/gvirm/multiclass_clean.csv LABEL_COL=ROCK1 \
+	  $(PYTHON) scripts/preprocess_data.py
+
+preprocess-spatial: ## Preprocess spatial dataset (Data1.csv)
+	DATA_PATH=data/gvirm/Data1.csv LABEL_COL=rock_name SPATIAL=true \
+	  $(PYTHON) scripts/preprocess_data.py
+
+preprocess-all: preprocess preprocess-spatial ## Preprocess both datasets
 
 # ─── Training ────────────────────────────────────────────────────────────────
 train-iforest: ## Train Isolation Forest  (multiclass_clean.csv)

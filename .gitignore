@@ -5,7 +5,9 @@ build/
 dist/
 wheels/
 *.egg-info
-.llm*
+
+# LLM and data files
+.llm
 data
 
 # Virtual environments

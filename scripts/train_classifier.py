@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 from sklearn.preprocessing import LabelEncoder, RobustScaler
 
 from geochem_detect.config import load_config, model_params, training_params
@@ -76,14 +77,36 @@ def main() -> None:
     out_dir = OUTPUT_ROOT / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    X_test_s = X_all_s[splits["test_idx"]]
-    y_test = y_raw[splits["test_idx"]]
-    y_pred = clf.predict(X_test_s)
-    proba = clf.predict_proba(X_test_s)
+    # Class distribution is a property of the full dataset, plotted once
+    plot_class_distribution(
+        y_raw, class_names=list(class_names),
+        save_path=out_dir / "class_distribution.png",
+    )
 
-    plot_class_distribution(y_raw, class_names=list(class_names), save_path=out_dir / "class_distribution.png")
-    plot_confusion_matrix(y_test, y_pred, class_names=list(class_names), save_path=out_dir / "confusion_matrix.png")
-    plot_pr_curves_multiclass(y_test, proba, class_names=list(class_names), save_path=out_dir / "pr_curves_multiclass.png")
+    named_splits = {
+        "train": splits["train_idx"],
+        "val":   splits["val_idx"],
+        "test":  splits["test_idx"],
+        "all":   np.concatenate([splits["train_idx"], splits["val_idx"], splits["test_idx"]]),
+    }
+
+    for split_name, idx in named_splits.items():
+        X_s    = X_all_s[idx]
+        y_s    = y_raw[idx]
+        y_pred = clf.predict(X_s)
+        proba  = clf.predict_proba(X_s)
+        title_sfx = f"({split_name})"
+        plot_confusion_matrix(
+            y_s, y_pred, class_names=list(class_names),
+            title=f"Confusion Matrix {title_sfx}",
+            save_path=out_dir / f"confusion_matrix_{split_name}.png",
+        )
+        plot_pr_curves_multiclass(
+            y_s, proba, class_names=list(class_names),
+            title=f"Per-class Precision-Recall Curves {title_sfx}",
+            save_path=out_dir / f"pr_curves_multiclass_{split_name}.png",
+        )
+
     print(f"Plots saved to {out_dir}/")
 
 

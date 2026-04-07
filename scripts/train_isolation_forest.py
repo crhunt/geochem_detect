@@ -72,12 +72,30 @@ def main() -> None:
     contamination = tp.get("contamination_threshold", mp.get("contamination", 0.05))
     classes_all, counts_all = np.unique(y_raw, return_counts=True)
     rare = classes_all[counts_all < int(contamination * len(y_raw))]
-    y_anomaly = np.isin(y_raw[splits["test_idx"]], rare).astype(int)
 
-    X_test_s = X_all_s[splits["test_idx"]]
-    scores = det.anomaly_scores(X_test_s)
-    plot_pr_curve_binary(y_anomaly, scores, save_path=out_dir / "pr_curve_iforest.png")
-    plot_anomaly_scores_histogram(scores, save_path=out_dir / "scores_iforest.png")
+    named_splits = {
+        "train": splits["train_idx"],
+        "val":   splits["val_idx"],
+        "test":  splits["test_idx"],
+        "all":   np.concatenate([splits["train_idx"], splits["val_idx"], splits["test_idx"]]),
+    }
+
+    for split_name, idx in named_splits.items():
+        X_s    = X_all_s[idx]
+        y_anom = np.isin(y_raw[idx], rare).astype(int)
+        scores = det.anomaly_scores(X_s)
+        title_sfx = f"({split_name})"
+        plot_pr_curve_binary(
+            y_anom, scores,
+            title=f"Precision-Recall Curve {title_sfx}",
+            save_path=out_dir / f"pr_curve_iforest_{split_name}.png",
+        )
+        plot_anomaly_scores_histogram(
+            scores,
+            title=f"Anomaly Score Distribution {title_sfx}",
+            save_path=out_dir / f"scores_iforest_{split_name}.png",
+        )
+
     print(f"Plots saved to {out_dir}/")
 
 

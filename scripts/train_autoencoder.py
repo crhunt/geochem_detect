@@ -97,31 +97,47 @@ def main() -> None:
     out_dir = OUTPUT_ROOT / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    te = splits["test_idx"]
-    X_te = X_all_s[te]
-    X_sp_te = X_spatial[te] if X_spatial is not None else None
+    sigma_cutoff = tp.get("anomaly_sigma_cutoff", 2.0)
     contamination = tp.get("contamination_threshold", 0.05)
     classes_all, counts_all = np.unique(y_raw, return_counts=True)
     rare = classes_all[counts_all < int(contamination * len(y_raw))]
-    y_anomaly = np.isin(y_raw[splits["test_idx"]], rare).astype(int)
-
-    scores = det.anomaly_scores(X_te, X_sp_te)
-    sigma_cutoff = tp.get("anomaly_sigma_cutoff", 2.0)
-    threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
-
-    plot_pr_curve_binary(y_anomaly, scores, save_path=out_dir / "pr_curve_autoencoder.png")
-    plot_anomaly_scores_histogram(
-        scores, sigma_cutoff=sigma_cutoff,
-        save_path=out_dir / "scores_autoencoder.png",
-    )
 
     gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
-    plot_spatial_anomalies(
-        gdf_clean.iloc[te], scores,
-        threshold=threshold,
-        y_true=y_anomaly,
-        save_path=out_dir / "spatial_anomaly_map.png",
-    )
+
+    named_splits = {
+        "train": splits["train_idx"],
+        "val":   splits["val_idx"],
+        "test":  splits["test_idx"],
+        "all":   np.concatenate([splits["train_idx"], splits["val_idx"], splits["test_idx"]]),
+    }
+
+    for split_name, idx in named_splits.items():
+        X_s   = X_all_s[idx]
+        X_sp_s = X_spatial[idx] if X_spatial is not None else None
+        y_anom = np.isin(y_raw[idx], rare).astype(int)
+
+        scores    = det.anomaly_scores(X_s, X_sp_s)
+        threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+        title_sfx = f"({split_name})"
+
+        plot_pr_curve_binary(
+            y_anom, scores,
+            title=f"Precision-Recall Curve {title_sfx}",
+            save_path=out_dir / f"pr_curve_autoencoder_{split_name}.png",
+        )
+        plot_anomaly_scores_histogram(
+            scores, sigma_cutoff=sigma_cutoff,
+            title=f"Anomaly Score Distribution {title_sfx}",
+            save_path=out_dir / f"scores_autoencoder_{split_name}.png",
+        )
+        plot_spatial_anomalies(
+            gdf_clean.iloc[idx], scores,
+            threshold=threshold,
+            y_true=y_anom,
+            title=f"Spatial Anomaly Map {title_sfx}",
+            save_path=out_dir / f"spatial_anomaly_map_{split_name}.png",
+        )
+
     print(f"Plots saved to {out_dir}/")
 
 

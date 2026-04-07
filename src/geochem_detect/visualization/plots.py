@@ -36,6 +36,7 @@ def plot_pr_curves_multiclass(
     y_true: np.ndarray,
     proba: np.ndarray,
     class_names: list[str],
+    title: str = "Per-class Precision-Recall Curves",
     save_path: str | Path | None = None,
 ) -> plt.Figure:
     """Plot per-class PR curves for a multi-class classifier."""
@@ -53,7 +54,7 @@ def plot_pr_curves_multiclass(
 
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
-    ax.set_title("Per-class Precision-Recall Curves")
+    ax.set_title(title)
     ax.legend(fontsize=7, loc="lower left")
     plt.tight_layout()
     if save_path:
@@ -65,6 +66,7 @@ def plot_confusion_matrix(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     class_names: list[str] | None = None,
+    title: str = "Normalised Confusion Matrix",
     save_path: str | Path | None = None,
 ) -> plt.Figure:
     """Plot a normalised confusion matrix."""
@@ -72,7 +74,7 @@ def plot_confusion_matrix(
     fig, ax = plt.subplots(figsize=(max(6, len(cm)), max(5, len(cm) - 1)))
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
     disp.plot(ax=ax, colorbar=True, cmap="Blues", xticks_rotation=45)
-    ax.set_title("Normalised Confusion Matrix")
+    ax.set_title(title)
     plt.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150)

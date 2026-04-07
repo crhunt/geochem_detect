@@ -81,16 +81,60 @@ def plot_confusion_matrix(
 
 def plot_anomaly_scores_histogram(
     scores: np.ndarray,
-    threshold: float | None = None,
+    sigma_cutoff: float = 2.0,
     title: str = "Anomaly Score Distribution",
     save_path: str | Path | None = None,
 ) -> plt.Figure:
-    """Histogram of anomaly scores with optional threshold line."""
-    fig, ax = plt.subplots(figsize=(7, 4))
+    """Histogram of anomaly scores with per-sigma reference lines and cutoff.
+
+    Vertical grey dotted lines are drawn at each whole-σ above and below the
+    mean.  A red dashed line marks the anomaly cutoff at
+    ``mean + sigma_cutoff * std``.  All statistics are derived from *scores*.
+
+    Parameters
+    ----------
+    scores:
+        1-D array of normalised anomaly scores.
+    sigma_cutoff:
+        Number of standard deviations above the mean used as the anomaly
+        decision boundary.
+    """
+    fig, ax = plt.subplots(figsize=(8, 4))
     ax.hist(scores, bins=60, edgecolor="none", alpha=0.75, color="steelblue")
-    if threshold is not None:
-        ax.axvline(threshold, color="red", linestyle="--", label=f"Threshold={threshold:.3f}")
-        ax.legend()
+
+    mean = float(np.mean(scores))
+    std  = float(np.std(scores))
+    cutoff = mean + sigma_cutoff * std
+
+    # Grey dotted lines at each whole-sigma within the visible range
+    max_sigma = int(np.ceil(abs(sigma_cutoff))) + 1
+    for s in range(1, max_sigma + 1):
+        for sign in (1, -1):
+            x = mean + sign * s * std
+            if scores.min() <= x <= scores.max():
+                ax.axvline(
+                    x,
+                    color="grey", linestyle=":", linewidth=0.9, alpha=0.7,
+                    label=f"{'+' if sign > 0 else '-'}{s}σ",
+                )
+
+    # Mean and cutoff
+    ax.axvline(mean, color="black", linestyle="-", linewidth=1.0, alpha=0.7,
+               label=f"Mean = {mean:.3f}")
+    ax.axvline(cutoff, color="red", linestyle="--", linewidth=1.5,
+               label=f"Cutoff (mean + {sigma_cutoff:.1f}σ = {cutoff:.3f})")
+
+    # Deduplicate legend entries (sigma labels can repeat for ±)
+    handles, labels = ax.get_legend_handles_labels()
+    seen: set[str] = set()
+    unique: list = []
+    for h, l in zip(handles, labels):
+        if l not in seen:
+            seen.add(l)
+            unique.append((h, l))
+    if unique:
+        ax.legend(*zip(*unique), fontsize=8)
+
     ax.set_xlabel("Anomaly Score")
     ax.set_ylabel("Count")
     ax.set_title(title)
@@ -104,18 +148,69 @@ def plot_spatial_anomalies(
     gdf,
     scores: np.ndarray,
     threshold: float = 0.7,
+    y_true: np.ndarray | None = None,
     title: str = "Spatial Anomaly Map",
     save_path: str | Path | None = None,
 ) -> plt.Figure:
-    """Plot anomaly scores on a map using a GeoDataFrame."""
+    """Plot anomaly scores on a map using a GeoDataFrame.
+
+    Parameters
+    ----------
+    gdf:
+        GeoDataFrame aligned with *scores* (same row order).
+    scores:
+        Continuous anomaly scores in [0, 1].
+    threshold:
+        Score cutoff above which a point is flagged as anomalous by the model.
+        Should be ``mean(scores) + sigma_cutoff * std(scores)``.
+    y_true:
+        Optional binary ground-truth labels (1 = truly anomalous by training
+        criteria, 0 = normal).  When provided, ground-truth anomalies are
+        overlaid as large unfilled diamonds and prediction statistics
+        (accuracy, TP, FP, FN) are shown on the plot.
+    """
     import geopandas as gpd  # noqa: F401
 
     fig, ax = plt.subplots(figsize=(10, 7))
-    normal = gdf[scores < threshold]
-    anomaly = gdf[scores >= threshold]
+    mask_anomaly = scores >= threshold
 
-    normal.plot(ax=ax, color="steelblue", markersize=4, alpha=0.5, label="Normal")
-    anomaly.plot(ax=ax, color="red", markersize=8, alpha=0.9, label="Anomaly")
+    normal  = gdf[~mask_anomaly]
+    anomaly = gdf[mask_anomaly]
+
+    normal.plot(ax=ax, color="steelblue", markersize=4, alpha=0.5, label="Normal (model)")
+    anomaly.plot(ax=ax, color="red", markersize=8, alpha=0.9, label="Anomaly (model)")
+
+    # Overlay ground-truth anomalies as unfilled diamonds
+    if y_true is not None:
+        gt_mask = np.asarray(y_true, dtype=bool)
+        gt_anom = gdf[gt_mask]
+        if len(gt_anom):
+            ax.scatter(
+                gt_anom.geometry.x.values,
+                gt_anom.geometry.y.values,
+                marker="D", s=80,
+                facecolors="none", edgecolors="black", linewidths=0.8,
+                alpha=0.85, label="Anomaly (true label)", zorder=5,
+            )
+
+        # Compute and display prediction statistics
+        y_pred = mask_anomaly.astype(int)
+        y_t    = np.asarray(y_true, dtype=int)
+        tp = int(((y_pred == 1) & (y_t == 1)).sum())
+        fp = int(((y_pred == 1) & (y_t == 0)).sum())
+        fn = int(((y_pred == 0) & (y_t == 1)).sum())
+        tn = int(((y_pred == 0) & (y_t == 0)).sum())
+        accuracy = (tp + tn) / len(y_t) if len(y_t) else 0.0
+        stats_text = (
+            f"Accuracy: {accuracy:.3f}\n"
+            f"TP: {tp}  FP: {fp}  FN: {fn}  TN: {tn}"
+        )
+        ax.text(
+            0.02, 0.02, stats_text,
+            transform=ax.transAxes,
+            fontsize=9, verticalalignment="bottom",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.8),
+        )
 
     ax.set_title(title)
     ax.set_xlabel("Longitude")

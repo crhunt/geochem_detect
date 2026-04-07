@@ -98,7 +98,7 @@ def _predict_classifier(model, X_s: np.ndarray, le, label_name: str) -> pd.DataF
     return df
 
 
-def _predict_anomaly(model, X_s: np.ndarray, model_type: str) -> pd.DataFrame:
+def _predict_anomaly(model, X_s: np.ndarray, model_type: str, art_dir: Path) -> pd.DataFrame:
     if model_type == "isolation_forest":
         from geochem_detect.models.isolation_forest import IsolationForestDetector
         det = IsolationForestDetector.__new__(IsolationForestDetector)
@@ -106,12 +106,25 @@ def _predict_anomaly(model, X_s: np.ndarray, model_type: str) -> pd.DataFrame:
         scores = det.anomaly_scores(X_s)
         flags  = det.predict(X_s)
     else:
-        # Keras autoencoder: compute reconstruction error
+        # Compute normalised anomaly scores
         preds = model.predict(X_s, verbose=0)
         errors = np.mean((X_s - preds) ** 2, axis=1)
         mn, mx = errors.min(), errors.max()
         scores = (errors - mn) / (mx - mn) if mx > mn else np.zeros_like(errors)
-        flags  = (scores > 0.5).astype(int)
+
+        # Load sigma_cutoff saved at training time; fall back to 2.0
+        sigma_cutoff = 2.0
+        threshold_file = art_dir / "anomaly_threshold.json"
+        if threshold_file.exists():
+            sigma_cutoff = json.loads(threshold_file.read_text()).get("sigma_cutoff", 2.0)
+        else:
+            print(
+                "  [warn] anomaly_threshold.json not found; "
+                "using sigma_cutoff=2.0.  Re-train to persist the configured value."
+            )
+        threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+        flags = (scores >= threshold).astype(int)
+
     return pd.DataFrame({"anomaly_score": scores, "is_anomaly": flags})
 
 
@@ -125,6 +138,7 @@ def _run_split(
     le,
     model_type: str,
     out_dir: Path,
+    art_dir: Path,
 ) -> None:
     X_s = scaler.transform(X_raw[idx]).astype("float32")
     true_labels = le.classes_[y_raw[idx]]
@@ -132,7 +146,7 @@ def _run_split(
     if model_type == "classifier":
         results = _predict_classifier(model, X_s, le, split_name)
     else:
-        results = _predict_anomaly(model, X_s, model_type)
+        results = _predict_anomaly(model, X_s, model_type, art_dir)
 
     results.insert(0, "true_label", true_labels)
     results.insert(0, "sample_idx", idx)
@@ -166,6 +180,7 @@ def main() -> None:
     le      = art["le"]
     splits  = art["splits"]
     info    = art["info"]
+    art_dir = art["art_dir"]
 
     X_raw, y_raw, class_names, orig_idx = _load_data(info, args.data_path)
 
@@ -178,19 +193,19 @@ def main() -> None:
 
     if args.split == "full":
         _run_split("full", np.arange(len(X_raw)), X_raw, y_raw,
-                   scaler, model, le, args.model_type, out_dir)
+                   scaler, model, le, args.model_type, out_dir, art_dir)
 
     elif args.split == "all":
         for name in ("train", "val", "test"):
             _run_split(name, splits[f"{name}_idx"], X_raw, y_raw,
-                       scaler, model, le, args.model_type, out_dir)
+                       scaler, model, le, args.model_type, out_dir, art_dir)
 
     else:
         key = f"{args.split}_idx"
         if key not in splits:
             raise KeyError(f"Split '{args.split}' not found in saved splits ({list(splits.keys())})")
         _run_split(args.split, splits[key], X_raw, y_raw,
-                   scaler, model, le, args.model_type, out_dir)
+                   scaler, model, le, args.model_type, out_dir, art_dir)
 
 
 if __name__ == "__main__":

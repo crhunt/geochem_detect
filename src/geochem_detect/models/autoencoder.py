@@ -169,3 +169,20 @@ class AutoencoderDetector:
         """PR-AUC treating anomaly=1 as the positive class."""
         scores = self.anomaly_scores(X_chem, X_spatial)
         return float(average_precision_score(y_true, scores))
+
+    def is_anomaly(
+        self,
+        X_chem: np.ndarray,
+        X_spatial: np.ndarray | None = None,
+        sigma_cutoff: float = 2.0,
+    ) -> np.ndarray:
+        """Binary anomaly flags using a sigma-based threshold.
+
+        The threshold is ``mean(scores) + sigma_cutoff * std(scores)`` where
+        *scores* are the anomaly scores of the provided data.  Both the
+        threshold and the flags are computed from the same set of scores so
+        that the decision boundary is always self-consistent.
+        """
+        scores = self.anomaly_scores(X_chem, X_spatial)
+        threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+        return (scores >= threshold).astype(int)

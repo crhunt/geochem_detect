@@ -106,11 +106,22 @@ def main() -> None:
     y_anomaly = np.isin(y_raw[splits["test_idx"]], rare).astype(int)
 
     scores = det.anomaly_scores(X_te, X_sp_te)
+    sigma_cutoff = tp.get("anomaly_sigma_cutoff", 2.0)
+    threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+
     plot_pr_curve_binary(y_anomaly, scores, save_path=out_dir / "pr_curve_autoencoder.png")
-    plot_anomaly_scores_histogram(scores, save_path=out_dir / "scores_autoencoder.png")
+    plot_anomaly_scores_histogram(
+        scores, sigma_cutoff=sigma_cutoff,
+        save_path=out_dir / "scores_autoencoder.png",
+    )
 
     gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
-    plot_spatial_anomalies(gdf_clean.iloc[te], scores, save_path=out_dir / "spatial_anomaly_map.png")
+    plot_spatial_anomalies(
+        gdf_clean.iloc[te], scores,
+        threshold=threshold,
+        y_true=y_anomaly,
+        save_path=out_dir / "spatial_anomaly_map.png",
+    )
     print(f"Plots saved to {out_dir}/")
 
 

@@ -158,7 +158,8 @@ def train_autoencoder(
 
     # Remove training-level keys that are not AutoencoderDetector constructor params
     contamination = params.pop("contamination_threshold", 0.05)
-    params.pop("spatial", None)  # spatial is handled by the caller via X_spatial
+    sigma_cutoff  = params.pop("anomaly_sigma_cutoff", 2.0)   # capture before popping
+    params.pop("spatial", None)          # handled by the caller via X_spatial
     classes_all, counts_all = np.unique(y, return_counts=True)
     rare = classes_all[counts_all < int(contamination * len(y))]
     y_anomaly = np.isin(y_test, rare).astype(int)
@@ -175,6 +176,7 @@ def train_autoencoder(
         epochs_run = len(det.history_.history["loss"])
         pr_auc = det.pr_auc(X_chem_te, y_anomaly, X_sp_te)
 
+        mlflow.log_param("anomaly_sigma_cutoff", sigma_cutoff)
         mlflow.log_metric("pr_auc", pr_auc)
         mlflow.log_metric("epochs_run", epochs_run)
         mlflow.log_metric("train_size", len(tr))
@@ -182,7 +184,7 @@ def train_autoencoder(
         mlflow.log_metric("test_size",  len(te))
 
         mlflow.tensorflow.log_model(det.model, artifact_path="autoencoder_model")
-        _save_run_artefacts(
+        art_dir = _save_run_artefacts(
             run_id,
             scaler=scaler,
             label_encoder=label_encoder,
@@ -190,8 +192,10 @@ def train_autoencoder(
             dataset_info=dataset_info,
             model_type="autoencoder",
         )
-        # Save the Keras model locally too for easy loading
-        keras_path = OUTPUT_ROOT / run_id / "artefacts" / "keras_model.keras"
+        # Persist sigma_cutoff so predict.py can apply the same threshold rule
+        with open(art_dir / "anomaly_threshold.json", "w") as f:
+            json.dump({"sigma_cutoff": sigma_cutoff}, f, indent=2)
+        keras_path = art_dir / "keras_model.keras"
         det.model.save(str(keras_path))
 
         print(f"[Autoencoder] PR-AUC: {pr_auc:.4f}  (epochs={epochs_run})  run_id={run_id}")

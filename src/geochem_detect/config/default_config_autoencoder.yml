@@ -14,4 +14,7 @@ model:
 # Whether to include scaled lat/lon as auxiliary inputs to the encoder
 training:
   spatial: false
-  contamination_threshold: 0.05
+  contamination_threshold: 0.01
+  # Score cutoff for flagging anomalies: mean + anomaly_sigma_cutoff * std
+  # This is independent of contamination_threshold (which defines ground-truth rare classes).
+  anomaly_sigma_cutoff: 2.0

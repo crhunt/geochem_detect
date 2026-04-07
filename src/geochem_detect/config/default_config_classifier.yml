@@ -1,0 +1,11 @@
+# Default hyperparameters for GeochemClassifier
+# These values are also the class defaults in models/classifier.py
+
+model:
+  hidden_dims: [64, 32]
+  dropout_rate: 0.3
+  learning_rate: 0.001
+  epochs: 100
+  batch_size: 64
+  validation_split: 0.15  # used only when no explicit val set is provided
+  patience: 15

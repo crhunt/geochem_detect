@@ -1,7 +1,12 @@
 """Train spatial autoencoder on Data1.csv.
 
 Usage:
-    uv run python scripts/train_autoencoder.py [--epochs 50] [--spatial]
+    uv run python scripts/train_autoencoder.py [--config path/to/config.yml]
+
+All hyperparameters are read from the config file (or from the bundled default
+when --config is omitted).  See src/geochem_detect/config/default_config_autoencoder.yml
+for the full list of tuneable settings.  The ``training.spatial`` flag can also
+be overridden on the command line with ``--spatial`` / ``--no-spatial``.
 """
 from __future__ import annotations
 
@@ -11,8 +16,9 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, RobustScaler
 
+from geochem_detect.config import load_config, model_params, training_params
 from geochem_detect.data.loader import feature_columns, load_spatial
-from geochem_detect.data.preprocessor import make_splits, scale_features, split_features_labels
+from geochem_detect.data.preprocessor import make_splits, split_features_labels
 from geochem_detect.training.trainer import train_autoencoder
 from geochem_detect.visualization.plots import (
     plot_anomaly_scores_histogram,
@@ -24,12 +30,34 @@ OUTPUT_ROOT = Path(__file__).parents[1] / "outputs"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--encoding_dim", type=int, default=4)
-    parser.add_argument("--spatial", action="store_true", help="Include lat/lon features")
-    parser.add_argument("--contamination", type=float, default=0.05)
+    parser = argparse.ArgumentParser(
+        description="Train spatial autoencoder anomaly detector."
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="Path to a YAML config file.  Overrides the bundled default.",
+    )
+    # Allow CLI to flip the spatial flag without needing a full custom config
+    spatial_group = parser.add_mutually_exclusive_group()
+    spatial_group.add_argument(
+        "--spatial", dest="spatial", action="store_true", default=None,
+        help="Include lat/lon features (overrides config).",
+    )
+    spatial_group.add_argument(
+        "--no-spatial", dest="spatial", action="store_false",
+        help="Disable lat/lon features (overrides config).",
+    )
     args = parser.parse_args()
+
+    cfg = load_config("autoencoder", args.config)
+    mp = model_params(cfg)
+    tp = training_params(cfg)
+
+    # CLI spatial flag takes precedence over config
+    use_spatial = tp.get("spatial", False) if args.spatial is None else args.spatial
+    tp["spatial"] = use_spatial
 
     gdf = load_spatial()
     feat_cols = feature_columns("spatial")
@@ -37,16 +65,14 @@ def main() -> None:
 
     splits = make_splits(X_raw, y_raw, orig_idx)
 
-    # Fit scaler on training rows only; apply to full array
     scaler = RobustScaler().fit(X_raw[splits["train_idx"]])
     X_all_s = scaler.transform(X_raw).astype("float32")
 
     le = LabelEncoder()
     le.classes_ = class_names
 
-    # Spatial features (fit scaler on train rows)
     X_spatial = None
-    if args.spatial:
+    if use_spatial:
         gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
         coords = gdf_clean[["lat", "long"]].values.astype(np.float32)
         sp_scaler = RobustScaler().fit(coords[splits["train_idx"]])
@@ -57,19 +83,15 @@ def main() -> None:
         "feature_cols": feat_cols,
         "label_col": "label",
         "n_samples": len(X_raw),
-        "spatial": args.spatial,
+        "spatial": use_spatial,
     }
 
-    params = dict(
-        epochs=args.epochs,
-        encoding_dim=args.encoding_dim,
-        contamination_threshold=args.contamination,
-    )
+    params = {**mp, **tp}
     det, pr_auc, run_id = train_autoencoder(
         X_all_s, y_raw, splits, le, scaler, dataset_info,
         X_spatial=X_spatial,
         params=params,
-        run_name="data1_spatial" if args.spatial else "data1_chem_only",
+        run_name="data1_spatial" if use_spatial else "data1_chem_only",
     )
 
     out_dir = OUTPUT_ROOT / run_id
@@ -78,10 +100,9 @@ def main() -> None:
     te = splits["test_idx"]
     X_te = X_all_s[te]
     X_sp_te = X_spatial[te] if X_spatial is not None else None
-    y_test = y_raw[te]
-    # Mirror the rare-class definition used in trainer: based on full y distribution
+    contamination = tp.get("contamination_threshold", 0.05)
     classes_all, counts_all = np.unique(y_raw, return_counts=True)
-    rare = classes_all[counts_all < int(args.contamination * len(y_raw))]
+    rare = classes_all[counts_all < int(contamination * len(y_raw))]
     y_anomaly = np.isin(y_raw[splits["test_idx"]], rare).astype(int)
 
     scores = det.anomaly_scores(X_te, X_sp_te)

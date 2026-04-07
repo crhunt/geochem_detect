@@ -41,14 +41,14 @@ preprocess-spatial: ## Preprocess spatial dataset (Data1.csv)
 preprocess-all: preprocess preprocess-spatial ## Preprocess both datasets
 
 # ─── Training ────────────────────────────────────────────────────────────────
-train-iforest: ## Train Isolation Forest  (multiclass_clean.csv)
-	$(PYTHON) scripts/train_isolation_forest.py
+train-iforest: ## Train Isolation Forest  (multiclass_clean.csv)  [CONFIG=path/to/config.yml]
+	$(PYTHON) scripts/train_isolation_forest.py $(if $(CONFIG),--config $(CONFIG),)
 
-train-autoencoder: ## Train spatial autoencoder  (Data1.csv + spatial features)
-	$(PYTHON) scripts/train_autoencoder.py --spatial
+train-autoencoder: ## Train spatial autoencoder  (Data1.csv + spatial features)  [CONFIG=path/to/config.yml]
+	$(PYTHON) scripts/train_autoencoder.py --spatial $(if $(CONFIG),--config $(CONFIG),)
 
-train-classifier: ## Train multi-class classifier  (multiclass_clean.csv)
-	$(PYTHON) scripts/train_classifier.py
+train-classifier: ## Train multi-class classifier  (multiclass_clean.csv)  [CONFIG=path/to/config.yml]
+	$(PYTHON) scripts/train_classifier.py $(if $(CONFIG),--config $(CONFIG),)
 
 train-all: train-iforest train-autoencoder train-classifier ## Train all three models sequentially
 

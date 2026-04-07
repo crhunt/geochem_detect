@@ -156,8 +156,9 @@ def train_autoencoder(
     X_sp_va = X_spatial[va] if X_spatial is not None else None
     X_sp_te = X_spatial[te] if X_spatial is not None else None
 
-    # Anomaly labels: rare classes defined by full-dataset distribution
+    # Remove training-level keys that are not AutoencoderDetector constructor params
     contamination = params.pop("contamination_threshold", 0.05)
+    params.pop("spatial", None)  # spatial is handled by the caller via X_spatial
     classes_all, counts_all = np.unique(y, return_counts=True)
     rare = classes_all[counts_all < int(contamination * len(y))]
     y_anomaly = np.isin(y_test, rare).astype(int)

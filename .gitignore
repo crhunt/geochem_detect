@@ -15,6 +15,7 @@ data
 
 # MLFlow artefacts
 mlruns/
+mlflow.db
 
 # Generated outputs
 outputs/

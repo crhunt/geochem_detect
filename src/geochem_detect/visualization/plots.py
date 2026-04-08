@@ -86,12 +86,15 @@ def plot_anomaly_scores_histogram(
     sigma_cutoff: float = 2.0,
     title: str = "Anomaly Score Distribution",
     save_path: str | Path | None = None,
+    threshold: float | None = None,
 ) -> plt.Figure:
     """Histogram of anomaly scores with per-sigma reference lines and cutoff.
 
     Vertical grey dotted lines are drawn at each whole-σ above and below the
-    mean.  A red dashed line marks the anomaly cutoff at
-    ``mean + sigma_cutoff * std``.  All statistics are derived from *scores*.
+    mean.  A red dashed line marks the anomaly cutoff.  When *threshold* is
+    provided it is used directly (e.g. a value calibrated on the validation
+    set); otherwise it is derived as ``mean + sigma_cutoff * std`` from
+    *scores* itself.
 
     Parameters
     ----------
@@ -99,14 +102,21 @@ def plot_anomaly_scores_histogram(
         1-D array of normalised anomaly scores.
     sigma_cutoff:
         Number of standard deviations above the mean used as the anomaly
-        decision boundary.
+        decision boundary.  Ignored when *threshold* is given explicitly.
+    threshold:
+        Absolute score cutoff.  When supplied, overrides the sigma-based
+        computation and is shown on the plot as the calibrated threshold.
     """
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.hist(scores, bins=60, edgecolor="none", alpha=0.75, color="steelblue")
 
     mean = float(np.mean(scores))
     std  = float(np.std(scores))
-    cutoff = mean + sigma_cutoff * std
+    if threshold is None:
+        threshold = mean + sigma_cutoff * std
+        cutoff_label = f"Cutoff (mean + {sigma_cutoff:.1f}\u03c3 = {threshold:.3f})"
+    else:
+        cutoff_label = f"Val threshold = {threshold:.3f}"
 
     # Grey dotted lines at each whole-sigma within the visible range
     max_sigma = int(np.ceil(abs(sigma_cutoff))) + 1
@@ -123,8 +133,8 @@ def plot_anomaly_scores_histogram(
     # Mean and cutoff
     ax.axvline(mean, color="black", linestyle="-", linewidth=1.0, alpha=0.7,
                label=f"Mean = {mean:.3f}")
-    ax.axvline(cutoff, color="red", linestyle="--", linewidth=1.5,
-               label=f"Cutoff (mean + {sigma_cutoff:.1f}σ = {cutoff:.3f})")
+    ax.axvline(threshold, color="red", linestyle="--", linewidth=1.5,
+               label=cutoff_label)
 
     # Deduplicate legend entries (sigma labels can repeat for ±)
     handles, labels = ax.get_legend_handles_labels()

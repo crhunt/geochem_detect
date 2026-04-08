@@ -112,17 +112,25 @@ def _predict_anomaly(model, X_s: np.ndarray, model_type: str, art_dir: Path) -> 
         mn, mx = errors.min(), errors.max()
         scores = (errors - mn) / (mx - mn) if mx > mn else np.zeros_like(errors)
 
-        # Load sigma_cutoff saved at training time; fall back to 2.0
-        sigma_cutoff = 2.0
+        # Load the calibrated threshold persisted at training time
         threshold_file = art_dir / "anomaly_threshold.json"
         if threshold_file.exists():
-            sigma_cutoff = json.loads(threshold_file.read_text()).get("sigma_cutoff", 2.0)
+            cfg = json.loads(threshold_file.read_text())
+            if "threshold" in cfg:
+                threshold = float(cfg["threshold"])
+            else:
+                # Legacy run: fall back to sigma-based computation
+                sigma_cutoff = cfg.get("sigma_cutoff", 2.0)
+                threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+                print(
+                    "  [warn] anomaly_threshold.json has no 'threshold' key; "
+                    "recomputing from sigma_cutoff.  Re-train to persist the calibrated value."
+                )
         else:
+            threshold = float(np.mean(scores) + 2.0 * np.std(scores))
             print(
-                "  [warn] anomaly_threshold.json not found; "
-                "using sigma_cutoff=2.0.  Re-train to persist the configured value."
+                "  [warn] anomaly_threshold.json not found; using sigma_cutoff=2.0."
             )
-        threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
         flags = (scores >= threshold).astype(int)
 
     return pd.DataFrame({"anomaly_score": scores, "is_anomaly": flags})

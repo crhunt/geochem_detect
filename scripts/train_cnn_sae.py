@@ -124,7 +124,7 @@ def main() -> None:
     contamination  = tp.get("contamination_threshold", 0.05)
     classes_all, counts_all = np.unique(y_raw, return_counts=True)
     rare = classes_all[counts_all < int(contamination * len(y_raw))]
-    # Per-point ground-truth anomaly labels for the raw datapoint overlay
+    # Per-point ground-truth anomaly labels (used for raw-data-point overlay)
     raw_anom_labels = np.isin(y_raw, rare).astype(np.int32)
 
     # Reload window splits and metadata from saved artefacts
@@ -140,10 +140,31 @@ def main() -> None:
     sampler = SpatialSampler(
         gdf=gdf_clean,
         feature_cols=feat_cols,
-        anomaly_labels=np.isin(y_raw, rare).astype(np.int32),
+        anomaly_labels=raw_anom_labels,
         **sp,
     )
     X_all, y_all, _ = sampler.generate()
+
+    # ── Score ALL windows at once for globally consistent normalization ───────
+    # anomaly_scores() uses per-batch min-max normalization, so scoring each
+    # split separately produces incomparable values (e.g. "all" can appear to
+    # have fewer detections than "train" alone).  Scoring everything together
+    # keeps the scale consistent across all per-split slices.
+    all_scores = det.anomaly_scores(X_all)
+
+    # ── Calibrate threshold in global score-space on the validation windows ──
+    val_idx_saved = splits_npz["val_idx"]
+    val_scores = all_scores[val_idx_saved]
+    threshold = float(np.mean(val_scores) + sigma_cutoff * np.std(val_scores))
+
+    # Update the saved anomaly_threshold.json with the calibrated value
+    with open(art_dir / "anomaly_threshold.json") as f:
+        threshold_data = json.load(f)
+    threshold_data["threshold"] = threshold
+    with open(art_dir / "anomaly_threshold.json", "w") as f:
+        json.dump(threshold_data, f, indent=2)
+    print(f"  [CNN-SAE] val threshold = {threshold:.4f} "
+          f"(mean={np.mean(val_scores):.4f}, sigma_cutoff={sigma_cutoff})")
 
     named_splits = {
         "train": splits_npz["train_idx"],
@@ -157,11 +178,10 @@ def main() -> None:
     }
 
     for split_name, idx in named_splits.items():
-        X_s   = X_all[idx]
         y_anom = y_all[idx]
 
-        scores    = det.anomaly_scores(X_s)
-        threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+        # Slice pre-computed global scores so normalization is consistent
+        scores = all_scores[idx]
         title_sfx = f"({split_name})"
 
         plot_pr_curve_binary(
@@ -173,6 +193,7 @@ def main() -> None:
             scores, sigma_cutoff=sigma_cutoff,
             title=f"Anomaly Score Distribution {title_sfx}",
             save_path=out_dir / f"scores_cnn_sae_{split_name}.png",
+            threshold=threshold,
         )
 
         # Build a per-window GeoDataFrame for the spatial plot
@@ -191,6 +212,12 @@ def main() -> None:
             ),
             crs="EPSG:4326",
         )
+        # Raw points that contributed to any window in this split,
+        # colored by their ground-truth anomaly label (rare class).
+        split_pt_idx = np.unique(
+            np.concatenate([all_metadata[i]["point_indices"] for i in idx])
+        ).astype(int)
+
         plot_spatial_anomalies(
             window_gdf, scores,
             threshold=threshold,
@@ -198,8 +225,8 @@ def main() -> None:
             title=f"Spatial Anomaly Map {title_sfx}",
             save_path=out_dir / f"spatial_anomaly_map_cnn_sae_{split_name}.png",
             window_deg=sp["window_deg"],
-            raw_gdf=gdf_clean,
-            raw_y=raw_anom_labels,
+            raw_gdf=gdf_clean.iloc[split_pt_idx],
+            raw_y=raw_anom_labels[split_pt_idx],
         )
 
     print(f"Plots saved to {out_dir}/")

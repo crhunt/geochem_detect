@@ -164,49 +164,54 @@ def _reconstruct_windows_from_metadata(
     return X_windows, y_windows
 
 
+
 def _predict_and_save(
     model,
-    X: np.ndarray,
-    y: np.ndarray,
-    idx: np.ndarray,
-    metadata: list[dict],
+    X,
+    y,
+    idx,
+    metadata,
     n_features: int,
+    threshold,
     sigma_cutoff: float,
     split_name: str,
     run_id: str,
-    output_dir: Path,
+    output_dir,
 ) -> None:
     """Score windows, build result DataFrame, and write CSV."""
-    # Wrap bare Keras model in a lightweight scorer rather than re-instantiating
-    # the full detector (avoids needing all constructor params at predict time)
     class _Scorer:
         def __init__(self, keras_model, n_feat: int) -> None:
             self.model = keras_model
             self.n_features = n_feat
 
-        def reconstruction_errors(self, X_in: np.ndarray) -> np.ndarray:
+        def reconstruction_errors(self, X_in):
+            import numpy as np
             X_feat = X_in[:, :, :, : self.n_features]
             occ    = X_in[:, :, :, self.n_features]
             preds  = self.model.predict(X_in, verbose=0)
             per_cell = np.mean((X_feat - preds) ** 2, axis=-1)
             masked   = per_cell * occ
             n_occ    = np.maximum(occ.sum(axis=(1, 2)), 1.0)
-            return (masked.sum(axis=(1, 2)) / n_occ).astype(np.float32)
+            return (masked.sum(axis=(1, 2)) / n_occ).astype("float32")
 
-        def anomaly_scores(self, X_in: np.ndarray) -> np.ndarray:
+        def anomaly_scores(self, X_in):
+            import numpy as np
             errors = self.reconstruction_errors(X_in)
             mn, mx = errors.min(), errors.max()
-            return (errors - mn) / (mx - mn) if mx > mn else np.zeros_like(errors)
+            return (errors - mn) / (mx - mn) if mx > mn else errors * 0.0
 
+    import numpy as np, pandas as pd
+    from pathlib import Path
     scorer = _Scorer(model, n_features)
     scores = scorer.anomaly_scores(X)
-    threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
-    is_anom = (scores >= threshold).astype(int)
+    # Use calibrated val threshold when available; fall back to sigma-based.
+    thr = float(threshold) if threshold is not None else float(
+        np.mean(scores) + sigma_cutoff * np.std(scores)
+    )
+    is_anom = (scores >= thr).astype(int)
 
     rows = []
-    for rank, (win_idx, score, flag, label) in enumerate(
-        zip(idx, scores, is_anom, y)
-    ):
+    for win_idx, score, flag, label in zip(idx, scores, is_anom, y):
         m = metadata[int(win_idx)]
         rows.append({
             "window_idx":    int(win_idx),
@@ -219,16 +224,17 @@ def _predict_and_save(
         })
 
     df = pd.DataFrame(rows)
-    pred_dir = output_dir / "predictions"
+    pred_dir = Path(output_dir) / "predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
     out_path = pred_dir / f"predictions_cnn_sae_{split_name}.csv"
     df.to_csv(out_path, index=False)
-    print(f"  [{split_name}] {len(df)} windows → {out_path}")
+    print(f"  [{split_name}] {len(df)} windows -> {out_path}")
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# --- Main -------------------------------------------------------------------
 
 def main() -> None:
+    import argparse
     parser = argparse.ArgumentParser(
         description="Run inference with a trained CNN-SAE model."
     )
@@ -241,7 +247,7 @@ def main() -> None:
                         help="Override the source CSV path.")
     parser.add_argument("--output-dir", default=None, metavar="DIR",
                         help="Root directory for output files "
-                             "(default: outputs/<run_id>/).")
+                             "(default: outputs/cnn_sae/<run_id>/).")
     args = parser.parse_args()
 
     art = _load_artefacts(args.run_id)
@@ -254,23 +260,30 @@ def main() -> None:
     metadata      = art["metadata"]
     splits        = art["splits"]
     threshold_cfg = art["threshold_cfg"]
-    sigma_cutoff  = threshold_cfg.get("sigma_cutoff", 2.0)
+    sigma_cutoff  = float(threshold_cfg.get("sigma_cutoff", 2.0))
     contamination = threshold_cfg.get("contamination_threshold", 0.05)
-    feat_cols      = info["feature_cols"]
-    n_features     = len(feat_cols)
+    # Calibrated val threshold persisted at training time; None for old runs.
+    threshold_val = threshold_cfg.get("threshold", None)
+    if threshold_val is not None:
+        threshold_val = float(threshold_val)
+    else:
+        print("  [warn] No calibrated threshold in anomaly_threshold.json; "
+              "falling back to sigma-based computation per split.  "
+              "Re-train to persist the val-calibrated threshold.")
+    feat_cols  = info["feature_cols"]
+    n_features = len(feat_cols)
 
     gdf_clean, X_raw, y_raw, class_names, _ = _load_source_data(info, args.data_path)
 
     if args.split == "full":
-        print("Generating new windows from source data…")
+        print("Generating new windows from source data...")
         X_all, y_all, new_meta = _rebuild_windows(
             gdf_clean, X_raw, y_raw, scaler, feat_cols, contamination, sp
         )
         all_idx = np.arange(len(X_all))
-        # Use new metadata for full split
         _predict_and_save(
             model, X_all, y_all, all_idx, new_meta,
-            n_features, sigma_cutoff, "full", args.run_id, out_dir,
+            n_features, threshold_val, sigma_cutoff, "full", args.run_id, out_dir,
         )
         return
 
@@ -285,14 +298,14 @@ def main() -> None:
         targets = {args.split: all_split_indices[args.split]}
 
     for split_name, idx in targets.items():
-        print(f"Reconstructing {len(idx)} windows for '{split_name}' split…")
+        print(f"Reconstructing {len(idx)} windows for '{split_name}' split...")
         X_s, y_s = _reconstruct_windows_from_metadata(
             metadata, idx, gdf_clean, X_raw, y_raw,
             scaler, feat_cols, contamination, sp,
         )
         _predict_and_save(
             model, X_s, y_s, idx, metadata,
-            n_features, sigma_cutoff, split_name, args.run_id, out_dir,
+            n_features, threshold_val, sigma_cutoff, split_name, args.run_id, out_dir,
         )
 
 

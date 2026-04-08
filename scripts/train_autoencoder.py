@@ -104,6 +104,24 @@ def main() -> None:
 
     gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
 
+    # ── Calibrate threshold on the validation set ────────────────────────────
+    # ── Score ALL points at once for globally consistent normalization ────────
+    # anomaly_scores() uses per-batch min-max normalization; scoring each split
+    # separately produces incomparable values.  Score everything together, then
+    # calibrate the threshold from the val slice of those global scores.
+    all_scores = det.anomaly_scores(X_all_s, X_spatial)
+    val_idx = splits["val_idx"]
+    val_scores = all_scores[val_idx]
+    threshold = float(np.mean(val_scores) + sigma_cutoff * np.std(val_scores))
+
+    # Persist the calibrated threshold so predict.py can apply the same value
+    import json
+    art_dir = out_dir / "artefacts"
+    with open(art_dir / "anomaly_threshold.json", "w") as f:
+        json.dump({"sigma_cutoff": sigma_cutoff, "threshold": threshold}, f, indent=2)
+    print(f"  [Autoencoder] val threshold = {threshold:.4f} "
+          f"(mean={np.mean(val_scores):.4f}, sigma_cutoff={sigma_cutoff})")
+
     named_splits = {
         "train": splits["train_idx"],
         "val":   splits["val_idx"],
@@ -112,12 +130,10 @@ def main() -> None:
     }
 
     for split_name, idx in named_splits.items():
-        X_s   = X_all_s[idx]
-        X_sp_s = X_spatial[idx] if X_spatial is not None else None
         y_anom = np.isin(y_raw[idx], rare).astype(int)
 
-        scores    = det.anomaly_scores(X_s, X_sp_s)
-        threshold = float(np.mean(scores) + sigma_cutoff * np.std(scores))
+        # Slice pre-computed global scores so normalization is consistent
+        scores    = all_scores[idx]
         title_sfx = f"({split_name})"
 
         plot_pr_curve_binary(
@@ -129,6 +145,7 @@ def main() -> None:
             scores, sigma_cutoff=sigma_cutoff,
             title=f"Anomaly Score Distribution {title_sfx}",
             save_path=out_dir / f"scores_autoencoder_{split_name}.png",
+            threshold=threshold,
         )
         gdf_split = gdf_clean.iloc[idx]
         plot_spatial_anomalies(

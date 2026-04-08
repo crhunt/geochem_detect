@@ -31,3 +31,104 @@ Here are some more small changes to implement:
 3. Check make targets and ensure they all execute paths that exist. Ie, do not create a test target if the project does not have tests.
 4. Add make targets and necessary code to specify a trained model and run it against test data. This ask includes making sure we track train/validate/test splits for each trained model. We want the option to run models against a full dataset (whether it is the dataset the model was trained on or not) or any/all splits of the data that was involved in training that model.
 
+Prompt 5
+
+Generalize the data pre-processing script. 
+1. We want to handle both spatial and non-spatial data with a flag. The column names for the "lat"/"long" columns and the label column should be settable with env variables, with defaults matching Data1.csv. The columns should be renamed as done in the current script. 
+2. Data column names should be read from the data file, with the ability to override this with a filepath to the column names.
+4. The script should handle the data originating from any filepath provided by an environment variable with a default value `./data/gvirm/multiclass_clean.csv`.
+
+Prompt 6
+
+We want to separate the default hyperparameter config values for each of the 3 models into ./src/geochem_detect/config/default_config_<model_name>.yml files. When running the train scripts, we will provide a link to a config file as a command line argument and the config will be passed to the trainer.py functions (with the default configs being used if nothing is passed). The default config files will provide the default values to the model classes defined under ./src/geochem_detect/models`.
+
+Prompt 7
+
+Update the readme with the additional information about the model configs and make sure to add getting started instructions for running each model.
+
+Prompt 8
+
+When running the make target `make train-autoencoder` we get the error,
+```
+TypeError: AutoencoderDetector.__init__() got an unexpected keyword argument 'spatial'
+```
+Correct this error and ensure the training completes successfully.
+
+Prompt 9
+
+Let's enhance the spatial_anomaly_map.png created after training the autoencoder. In the map, highlight in red data points identified as anomalous (as is currently done) and also use a different shape (a larger diamond that is not filled) to identify points that are anomalous according to the training criteria.
+
+Prompt 10
+
+On the anomaly score distribution plot, add vertical lines at each sigma and a red vertical line to indicate the cutoff for whether a data point is considered anomalous. The cutoff multiplier, a floating point number multiple of sigma, should be added to the autoencoder config as a configurable parameter. Note that this is distinct from the contamination_threshold which is used to define the ground truth about which classes are considered anomalous.
+
+Prompt 11
+
+The anomaly_sigma_cutoff should be used in autoencoder predictions to determine whether a datapoint is anomalous, via the anomaly score. Your task is to 1) describe how assignment (anomalous or not anamolous) is determined currently, then 2) update the model and scripts to use anomaly_sigma_cutoff to make the assignment.
+
+Prompt 12
+
+The scores_autoencoder.png plot looks confusing to me. There may be something wrong with the logic. Let's investigate and correct.
+
+1. Do not plot legacy threshold. We are in active development and do not need backward compatibility.
+2. The anomaly_sigma_cutoff should determine how many sigma above the mean anomaly score we use to determine whether a data point is anomalous. On this plot, the only red vertical line should indicate that cutoff (ie anomaly_sigma_cutoff*sigma). 
+3. The spatial_anomaly_map.png should show as Anomaly (model) only those points above the cutoff. Let's also calculate the accuracy, true positives, and false positives.
+
+Prompt 13
+
+How is validation data currently used in autoencoder training? For all plots and all models, let's create separate plots for train/val/test splits and one for all data. Indicate which data is plotted in the plot title and the filename.
+
+
+---
+
+Prompt 1
+
+We want to add to this repo a new model that uses an alternate method for anomaly detection. Follow the process for the autoencoder approach for determining anomalous data ground truth (ie, based on the label frequency). The new model is a sparse autoencoder (SAE) that uses lat/long data and a feature vector (as in ./data/gvirm/Data1.csv). We will first preprocess the data to create samples by taking random subsets of the data (random lat/long as the centerpoint and taking all datapoints within a certain window that is customizable via config). This data will be sparse, drawn from the source dataset (ie, Data1.csv). Then we will use a hybrid autoencoder approach with CNN+SAE to build a latent representation and reconstruction error to determine if the sample is anomalous. We will determine accuracy by checking if that data sample does indeed contain a datapoint that is anomalous (based on label as described above).
+
+Come up with a plan to implement this anomaly detection model. Include data preprocessing, considerations for handling sparsity, and follow the design patterns already in the geochem_detect repository.
+
+Prompt 2
+
+Good start implementing the model from the plan. Two small additions:
+1. Update make targets and readme to account for the new model.
+2. Analyze the dataset Data1.csv, especially the density of points and the full lat/long range. Define good defaults for the grid_size and window_deg the cnn_sae model default config.
+
+Prompt 3
+
+The spatial anomaly map for the new CNN-SAE model, trained using default config, is suspicious. Nearly all the points are labeled Anomaly (true label).
+1. Check how data is assigned anomalous in the ground truth--only datapoints from rare labels should be anomalous.
+2. Make sure the map does not convolute the labeling of a sample (a window containing datapoints) with the datapoints themselves. (This may or may not be related to the root cause of the problem.)
+3. Check the sample labels created using the default config. If most samples contain anomalous datapoints, then the window size may need to be adjusted to be significantly smaller.
+4. Add to the spatial anomaly map a plot of the window size by plotting the boundaries of a single sample.
+
+Prompt 4
+
+Determine a contamination_threshhold based on rock classes (labels) where less than 10% of all data points are anomalous. If this cannot be determined by a threshold, then default to using the smallest label (label with the fewest members). Set this contamination_threshhold default for all anomaly detection models in their default configs.
+
+Prompt 5
+
+Let's revise the spatial anomaly map plots for CNN-SAE to be more clear. Include both the original datapoints (not window centerpoints) and label them with blue dots for normal ground truth, red for anomaly ground truth. Also include red diamonds indicating the center of sample windows labeled anomalous by the model. Keep the orange sample window as-is.
+
+Prompt 6
+
+Let's revise the autoencoder spatial anomaly map to follow the pattern in CNN-SAE. Plot ground truth normal (blue)/anomaly (red) and anomaly detected with red diamonds. For the red diamonds make the fill transparent.
+
+Prompt 7
+
+For easier tracking of model training, please change the output results location to ./outputs/<model type>/<run id> instead of ./outputs/<run id>. Change all places these paths are referenced. Does not need to be backward compatible.
+
+Prompt 8
+
+Let's revise how we set the cutoff for anomalous score value in the autoencoder and CNN-SAE models. The cutoff should be set using the anomaly_sigma_cutoff*sigma for the validation dataset. This same value should be used to determine the model result for labeling anomalous data for all splits. Revise calculations and figures accordingly.
+
+Prompt 9
+
+Ensure that the plots for each train/val/test/all split only display ground truth and anomaly values for that split.
+
+Prompt 10
+
+I don't think this solves the issue. The plots showing spatial anomaly map seem to show all the ground truth points not just the points in the split. Ensure that the ground truth in the plots (and used for accuracy/TP/FN/TN calculations) only come from the split that's in the title.
+
+Prompt 11
+
+The plotting issue still remains, or there is a new one. The plot that should show "all" data points and anomaly detected for the CNN-SAE model shows fewer anomalies detected that the "train" plot. Each plot should show ONLY data related to that split: Normal (ground truth) datapoints used in windows in that split, Anomaly (ground truth) datapoints used in windows in that split, Anomaly detected (model) center of window for samples in that split.

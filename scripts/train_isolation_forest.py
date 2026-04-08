@@ -66,7 +66,7 @@ def main() -> None:
         run_name="multiclass_clean",
     )
 
-    out_dir = OUTPUT_ROOT / run_id
+    out_dir = OUTPUT_ROOT / "isolation_forest" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     contamination = tp.get("contamination_threshold", mp.get("contamination", 0.05))

@@ -94,7 +94,7 @@ def main() -> None:
         run_name="data1_spatial" if use_spatial else "data1_chem_only",
     )
 
-    out_dir = OUTPUT_ROOT / run_id
+    out_dir = OUTPUT_ROOT / "autoencoder" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     sigma_cutoff = tp.get("anomaly_sigma_cutoff", 2.0)
@@ -130,12 +130,15 @@ def main() -> None:
             title=f"Anomaly Score Distribution {title_sfx}",
             save_path=out_dir / f"scores_autoencoder_{split_name}.png",
         )
+        gdf_split = gdf_clean.iloc[idx]
         plot_spatial_anomalies(
-            gdf_clean.iloc[idx], scores,
+            gdf_split, scores,
             threshold=threshold,
             y_true=y_anom,
             title=f"Spatial Anomaly Map {title_sfx}",
             save_path=out_dir / f"spatial_anomaly_map_{split_name}.png",
+            raw_gdf=gdf_split,
+            raw_y=y_anom,
         )
 
     print(f"Plots saved to {out_dir}/")

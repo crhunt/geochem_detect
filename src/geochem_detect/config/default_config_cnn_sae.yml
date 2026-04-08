@@ -1,0 +1,49 @@
+sampling:
+  # Bounding-box half-width in decimal degrees (window = window_deg × window_deg).
+  # Data1.csv spans 6.7° lat × 2.7° lon at ~231 pts/sq-deg.  A 0.5° window
+  # yields a median of ~238 pts in 256 cells (~60 % occupancy with grid_size=16),
+  # giving a usefully sparse input for the CNN-SAE.  Larger values (e.g. 1.0°)
+  # pack nearly every cell and remove the sparsity signal.
+  # 0.5
+  window_deg: 0.25
+  # Spatial resolution of the output grid (grid_size × grid_size cells).
+  # At window_deg=0.5 each cell covers ~3.5 km × 3.5 km — a geologically
+  # meaningful scale and a good match for the typical sample spacing.
+  # 16
+  grid_size: 8
+  # Number of windows to sample (centers drawn from existing data points).
+  n_samples: 1000
+  # Minimum number of occupied grid cells required to accept a window
+  min_points: 2
+  # A window is labelled as anomalous when the fraction of its constituent
+  # source points that belong to rare classes meets or exceeds this value.
+  # The default of 0.5 means the majority of points must be rare.
+  # Using 0.0 ("any rare point") inflates the anomaly rate to near 100%
+  # for this dataset because 29% of all points come from rare classes.
+  anomaly_fraction_threshold: 0.01
+  random_state: 42
+
+model:
+  # CNN encoder filter counts for the two Conv2D layers
+  cnn_filters: [32, 64]
+  cnn_kernel_size: 3
+  # Sparse bottleneck dimension
+  encoding_dim: 64
+  # Dense bridge layers between CNN and bottleneck
+  dense_hidden_dims: [256, 128]
+  dropout_rate: 0.2
+  learning_rate: 0.001
+  # L1 regularisation on bottleneck activations (sparsity penalty)
+  sparsity_weight: 0.0001
+  epochs: 50
+  batch_size: 32
+  patience: 10
+
+training:
+  # Classes with fewer than contamination_threshold × N samples are anomalous.
+  # At 0.01: threshold = 38 members → 76 rare classes → 9.7% of points anomalous.
+  contamination_threshold: 0.01
+  # Anomaly decision threshold: mean + sigma_cutoff × std of scores
+  anomaly_sigma_cutoff: 2.0
+  val_size: 0.15
+  test_size: 0.15

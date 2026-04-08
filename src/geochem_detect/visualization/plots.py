@@ -153,13 +153,17 @@ def plot_spatial_anomalies(
     y_true: np.ndarray | None = None,
     title: str = "Spatial Anomaly Map",
     save_path: str | Path | None = None,
+    window_deg: float | None = None,
+    raw_gdf=None,
+    raw_y: np.ndarray | None = None,
 ) -> plt.Figure:
     """Plot anomaly scores on a map using a GeoDataFrame.
 
     Parameters
     ----------
     gdf:
-        GeoDataFrame aligned with *scores* (same row order).
+        GeoDataFrame aligned with *scores* (same row order).  Each row
+        represents ONE window (its centre point), not an individual data point.
     scores:
         Continuous anomaly scores in [0, 1].
     threshold:
@@ -167,35 +171,58 @@ def plot_spatial_anomalies(
         Should be ``mean(scores) + sigma_cutoff * std(scores)``.
     y_true:
         Optional binary ground-truth labels (1 = truly anomalous by training
-        criteria, 0 = normal).  When provided, ground-truth anomalies are
-        overlaid as large unfilled diamonds and prediction statistics
-        (accuracy, TP, FP, FN) are shown on the plot.
+        criteria, 0 = normal).  Labels are at the **window** level; a window
+        is anomalous when the fraction of its constituent data points with rare
+        rock-type labels meets the configured ``anomaly_fraction_threshold``.
+        When provided, window-level prediction statistics (accuracy, TP, FP, FN)
+        are shown on the plot.
+    window_deg:
+        Side length of the sampling window in decimal degrees.  When given,
+        a single representative window boundary is drawn as a dashed rectangle
+        to convey the spatial scale of each sample.
+    raw_gdf:
+        Optional GeoDataFrame of the original individual data points (not window
+        centres).  When provided together with *raw_y*, each point is plotted as
+        a small dot coloured by its ground-truth anomaly status.
+    raw_y:
+        Per-point binary ground-truth labels aligned with *raw_gdf* rows
+        (1 = anomalous, 0 = normal).
     """
-    import geopandas as gpd  # noqa: F401
-
     fig, ax = plt.subplots(figsize=(10, 7))
     mask_anomaly = scores >= threshold
 
-    normal  = gdf[~mask_anomaly]
-    anomaly = gdf[mask_anomaly]
-
-    normal.plot(ax=ax, color="steelblue", markersize=4, alpha=0.5, label="Normal (model)")
-    anomaly.plot(ax=ax, color="red", markersize=8, alpha=0.9, label="Anomaly (model)")
-
-    # Overlay ground-truth anomalies as unfilled diamonds
-    if y_true is not None:
-        gt_mask = np.asarray(y_true, dtype=bool)
-        gt_anom = gdf[gt_mask]
-        if len(gt_anom):
+    # Layer 1: original data points coloured by ground-truth anomaly status
+    if raw_gdf is not None and raw_y is not None:
+        raw_y_arr = np.asarray(raw_y, dtype=int)
+        raw_normal  = raw_gdf[raw_y_arr == 0]
+        raw_anomaly = raw_gdf[raw_y_arr == 1]
+        if len(raw_normal) > 0:
             ax.scatter(
-                gt_anom.geometry.x.values,
-                gt_anom.geometry.y.values,
-                marker="D", s=80,
-                facecolors="none", edgecolors="black", linewidths=0.8,
-                alpha=0.85, label="Anomaly (true label)", zorder=5,
+                raw_normal.geometry.x.values,
+                raw_normal.geometry.y.values,
+                s=8, color="steelblue", alpha=0.4,
+                label="Normal (ground truth)", zorder=2,
+            )
+        if len(raw_anomaly) > 0:
+            ax.scatter(
+                raw_anomaly.geometry.x.values,
+                raw_anomaly.geometry.y.values,
+                s=8, color="firebrick", alpha=0.6,
+                label="Anomaly (ground truth)", zorder=3,
             )
 
-        # Compute and display prediction statistics
+    # Layer 2: model-predicted anomalous window centres as transparent red diamonds
+    det_anomaly = gdf[mask_anomaly]
+    if len(det_anomaly) > 0:
+        ax.scatter(
+            det_anomaly.geometry.x.values,
+            det_anomaly.geometry.y.values,
+            marker="D", s=60, facecolors="none", edgecolors="red", linewidths=1.2,
+            alpha=0.9, label="Anomaly detected (model)", zorder=5,
+        )
+
+    # Window-level prediction statistics (requires window ground-truth labels)
+    if y_true is not None:
         y_pred = mask_anomaly.astype(int)
         y_t    = np.asarray(y_true, dtype=int)
         tp = int(((y_pred == 1) & (y_t == 1)).sum())
@@ -213,6 +240,19 @@ def plot_spatial_anomalies(
             fontsize=9, verticalalignment="bottom",
             bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.8),
         )
+
+    # Draw a dashed bounding box for one representative window
+    if window_deg is not None and len(gdf) > 0:
+        import matplotlib.patches as mpatches
+        half = window_deg / 2.0
+        cx = float(gdf.geometry.x.iloc[0])
+        cy = float(gdf.geometry.y.iloc[0])
+        rect = mpatches.Rectangle(
+            (cx - half, cy - half), window_deg, window_deg,
+            linewidth=1.5, edgecolor="darkorange", facecolor="none",
+            linestyle="--", label=f"Sample window ({window_deg}°)", zorder=6,
+        )
+        ax.add_patch(rect)
 
     ax.set_title(title)
     ax.set_xlabel("Longitude")

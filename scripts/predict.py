@@ -36,8 +36,8 @@ OUTPUT_ROOT = Path(__file__).parents[1] / "outputs"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-def _load_artefacts(run_id: str) -> dict:
-    art = OUTPUT_ROOT / run_id / "artefacts"
+def _load_artefacts(run_id: str, model_type: str) -> dict:
+    art = OUTPUT_ROOT / model_type / run_id / "artefacts"
     if not art.exists():
         raise FileNotFoundError(
             f"Artefacts not found for run_id={run_id} at {art}.\n"
@@ -52,7 +52,7 @@ def _load_artefacts(run_id: str) -> dict:
 
 
 def _load_model(run_id: str, model_type: str):
-    art = OUTPUT_ROOT / run_id / "artefacts"
+    art = OUTPUT_ROOT / model_type / run_id / "artefacts"
     if model_type == "isolation_forest":
         return pickle.loads((art / "model.pkl").read_bytes())
     keras_path = art / "keras_model.keras"
@@ -174,7 +174,7 @@ def main() -> None:
     if args.data_path and args.split != "full":
         parser.error("--data-path can only be used with --split full")
 
-    art = _load_artefacts(args.run_id)
+    art = _load_artefacts(args.run_id, args.model_type)
     model   = _load_model(args.run_id, args.model_type)
     scaler  = art["scaler"]
     le      = art["le"]
@@ -184,7 +184,7 @@ def main() -> None:
 
     X_raw, y_raw, class_names, orig_idx = _load_data(info, args.data_path)
 
-    out_dir = OUTPUT_ROOT / args.run_id / "predictions"
+    out_dir = OUTPUT_ROOT / args.model_type / args.run_id / "predictions"
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nRun ID   : {args.run_id}")
     print(f"Model    : {args.model_type}")

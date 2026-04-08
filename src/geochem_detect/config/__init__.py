@@ -11,6 +11,7 @@ _DEFAULT_CONFIGS: dict[str, Path] = {
     "isolation_forest": _CONFIG_DIR / "default_config_isolation_forest.yml",
     "autoencoder":      _CONFIG_DIR / "default_config_autoencoder.yml",
     "classifier":       _CONFIG_DIR / "default_config_classifier.yml",
+    "cnn_sae":          _CONFIG_DIR / "default_config_cnn_sae.yml",
 }
 
 
@@ -20,7 +21,8 @@ def load_config(model_type: str, config_path: str | Path | None = None) -> dict:
     Parameters
     ----------
     model_type:
-        One of ``"isolation_forest"``, ``"autoencoder"``, ``"classifier"``.
+        One of ``"isolation_forest"``, ``"autoencoder"``, ``"classifier"``,
+        ``"cnn_sae"``.
     config_path:
         Optional path to a custom YAML file.  When ``None`` the default config
         bundled with the package is used.
@@ -54,9 +56,13 @@ def load_config(model_type: str, config_path: str | Path | None = None) -> dict:
             else:
                 cfg[section] = values
 
-    # Normalise hidden_dims to a list (YAML loads it as a list, but guard anyway)
+    # Normalise list-valued fields (YAML loads them as lists already, but guard anyway)
     if "model" in cfg and "hidden_dims" in cfg["model"]:
         cfg["model"]["hidden_dims"] = list(cfg["model"]["hidden_dims"])
+    if "model" in cfg and "cnn_filters" in cfg["model"]:
+        cfg["model"]["cnn_filters"] = list(cfg["model"]["cnn_filters"])
+    if "model" in cfg and "dense_hidden_dims" in cfg["model"]:
+        cfg["model"]["dense_hidden_dims"] = list(cfg["model"]["dense_hidden_dims"])
 
     return cfg
 
@@ -69,3 +75,8 @@ def model_params(cfg: dict) -> dict:
 def training_params(cfg: dict) -> dict:
     """Extract the ``training`` section of a loaded config dict."""
     return dict(cfg.get("training", {}))
+
+
+def sampling_params(cfg: dict) -> dict:
+    """Extract the ``sampling`` section of a loaded config dict (CNN-SAE only)."""
+    return dict(cfg.get("sampling", {}))

@@ -11,8 +11,10 @@ DATA_PATH  ?=
 .DEFAULT_GOAL := help
 
 .PHONY: help venv install preprocess preprocess-spatial preprocess-all \
-        train-iforest train-autoencoder train-classifier train-all \
+        train-iforest train-autoencoder train-classifier train-cnn-sae train-all \
         predict-train predict-val predict-test predict-all predict-full \
+        predict-cnn-sae-train predict-cnn-sae-val predict-cnn-sae-test \
+        predict-cnn-sae-all predict-cnn-sae-full \
         lint format \
         mlflow-ui \
         clean clean-outputs clean-processed clean-pycache
@@ -50,7 +52,10 @@ train-autoencoder: ## Train spatial autoencoder  (Data1.csv + spatial features) 
 train-classifier: ## Train multi-class classifier  (multiclass_clean.csv)  [CONFIG=path/to/config.yml]
 	$(PYTHON) scripts/train_classifier.py $(if $(CONFIG),--config $(CONFIG),)
 
-train-all: train-iforest train-autoencoder train-classifier ## Train all three models sequentially
+train-cnn-sae: ## Train CNN-SAE spatial anomaly detector  (Data1.csv)  [CONFIG=path/to/config.yml]
+	$(PYTHON) scripts/train_cnn_sae.py $(if $(CONFIG),--config $(CONFIG),)
+
+train-all: train-iforest train-autoencoder train-classifier train-cnn-sae ## Train all four models sequentially
 
 # ─── Prediction ──────────────────────────────────────────────────────────────
 # Run a trained model against a specific data split or dataset.
@@ -71,6 +76,27 @@ predict-all: ## Run model against train + val + test       (RUN_ID= MODEL_TYPE=)
 
 predict-full: ## Run model against full dataset            (RUN_ID= MODEL_TYPE= [DATA_PATH=])
 	$(PYTHON) scripts/predict.py --run-id $(RUN_ID) --model-type $(MODEL_TYPE) --split full \
+	  $(if $(DATA_PATH),--data-path $(DATA_PATH),)
+
+# ─── CNN-SAE Prediction ──────────────────────────────────────────────────────
+# Run the CNN-SAE model against a specific window split.
+# Required: RUN_ID=<mlflow run id>
+# Example:  make predict-cnn-sae-test RUN_ID=abc123
+
+predict-cnn-sae-train: ## Run CNN-SAE against its training windows   (RUN_ID=)
+	$(PYTHON) scripts/predict_cnn_sae.py --run-id $(RUN_ID) --split train
+
+predict-cnn-sae-val: ## Run CNN-SAE against its validation windows  (RUN_ID=)
+	$(PYTHON) scripts/predict_cnn_sae.py --run-id $(RUN_ID) --split val
+
+predict-cnn-sae-test: ## Run CNN-SAE against its test windows       (RUN_ID=)
+	$(PYTHON) scripts/predict_cnn_sae.py --run-id $(RUN_ID) --split test
+
+predict-cnn-sae-all: ## Run CNN-SAE against train + val + test      (RUN_ID=)
+	$(PYTHON) scripts/predict_cnn_sae.py --run-id $(RUN_ID) --split all
+
+predict-cnn-sae-full: ## Run CNN-SAE on a fresh set of windows      (RUN_ID= [DATA_PATH=])
+	$(PYTHON) scripts/predict_cnn_sae.py --run-id $(RUN_ID) --split full \
 	  $(if $(DATA_PATH),--data-path $(DATA_PATH),)
 
 # ─── Code quality ────────────────────────────────────────────────────────────

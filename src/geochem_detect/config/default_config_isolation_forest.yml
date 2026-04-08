@@ -3,12 +3,16 @@
 
 model:
   n_estimators: 200
-  contamination: 0.05
+  # Expected fraction of outliers; used by sklearn to set the decision threshold.
+  # Matches the actual anomaly fraction at contamination_threshold=0.01:
+  # 76 rare classes (< 38 members each) -> 378 / 3886 points = 9.7%.
+  contamination: 0.097
   max_features: 1.0
   random_state: 42
   n_jobs: -1
 
 # Fraction of the full dataset used to define "rare" classes for anomaly labelling.
 # A class is flagged as anomalous if its count is below contamination_threshold * N.
+# At 0.01: threshold = 38 members -> 76 rare classes -> 9.7% of points anomalous.
 training:
-  contamination_threshold: 0.05
+  contamination_threshold: 0.01

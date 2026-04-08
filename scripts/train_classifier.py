@@ -74,7 +74,7 @@ def main() -> None:
         run_name="multiclass_clean",
     )
 
-    out_dir = OUTPUT_ROOT / run_id
+    out_dir = OUTPUT_ROOT / "classifier" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Class distribution is a property of the full dataset, plotted once

@@ -28,13 +28,11 @@ Output CSV columns:
 """
 from __future__ import annotations
 
-import argparse
 import json
 import pickle
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 OUTPUT_ROOT = Path(__file__).parents[1] / "outputs"
 
@@ -76,13 +74,30 @@ def _load_keras_model(run_id: str):
 
 def _load_source_data(info: dict, data_path: str | None):
     """Load and clean the source GeoDataFrame, returning scaled features."""
-    from geochem_detect.data.loader import load_spatial
-    from geochem_detect.data.preprocessor import split_features_labels
+    from sklearn.preprocessing import LabelEncoder
 
-    gdf = load_spatial(data_path)
-    feat_cols: list[str] = info["feature_cols"]
-    X_raw, y_raw, class_names, _ = split_features_labels(gdf, feat_cols)
-    gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
+    from geochem_detect.data.loader import load_spatial_frame
+    from geochem_detect.data.preprocessor import prepare_labeled_frame
+
+    data_cfg = {
+        "data_path": data_path or info["dataset"],
+        "feature_columns": info["feature_cols"],
+        "longitude": info.get("longitude"),
+        "latitude": info.get("latitude"),
+        "normalize_by": info.get("normalize_by"),
+        "scale_features": info.get("scale_features", True),
+    }
+    gdf, data_options = load_spatial_frame(data_cfg, info["dataset"])
+    gdf_clean, feat_cols = prepare_labeled_frame(
+        gdf,
+        data_options["feature_columns"],
+        data_options["label_col"],
+        normalize_by=data_options["normalize_by"],
+    )
+    X_raw = gdf_clean[feat_cols].to_numpy(dtype=np.float32)
+    le = LabelEncoder()
+    y_raw = le.fit_transform(gdf_clean[data_options["label_col"]].values)
+    class_names = le.classes_
     return gdf_clean, X_raw, y_raw, class_names, feat_cols
 
 
@@ -200,7 +215,6 @@ def _predict_and_save(
             mn, mx = errors.min(), errors.max()
             return (errors - mn) / (mx - mn) if mx > mn else errors * 0.0
 
-    import numpy as np, pandas as pd
     from pathlib import Path
     scorer = _Scorer(model, n_features)
     scores = scorer.anomaly_scores(X)

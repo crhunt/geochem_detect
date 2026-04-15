@@ -1,3 +1,21 @@
+data:
+  data_path: gvirm/Data1.csv
+  feature_columns:
+    - SiO2n
+    - TiO2n
+    - Al2O3n
+    - FeO*n
+    - MnOn
+    - MgOn
+    - CaOn
+    - Na2On
+    - K2On
+    - P2O5n
+  longitude: long
+  latitude: lat
+  scale_features: true
+  # normalize_by: some_reference_column
+
 sampling:
   # Bounding-box half-width in decimal degrees (window = window_deg × window_deg).
   # Data1.csv spans 6.7° lat × 2.7° lon at ~231 pts/sq-deg.  A 0.5° window
@@ -40,10 +58,13 @@ model:
   patience: 10
 
 training:
-  # Classes with fewer than contamination_threshold × N samples are anomalous.
-  # At 0.01: threshold = 38 members → 76 rare classes → 9.7% of points anomalous.
-  contamination_threshold: 0.001
-  # Anomaly decision threshold: mean + sigma_cutoff × std of scores
-  anomaly_sigma_cutoff: 2.0
   val_size: 0.15
   test_size: 0.15
+
+evaluation:
+  # Classes with fewer than contamination_threshold × N samples are anomalous.
+  # Alternatively, specify exact label values directly via anomaly_labels.
+  contamination_threshold: 0.001
+  # anomaly_labels: ["label_a", "label_b"]
+  # Anomaly decision threshold: mean + sigma_cutoff × std of scores
+  anomaly_sigma_cutoff: 2.0

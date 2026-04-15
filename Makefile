@@ -7,6 +7,8 @@ MLFLOW_PORT := 5000
 RUN_ID     ?= $(error RUN_ID is required for predict targets, e.g. make predict-test RUN_ID=<run_id> MODEL_TYPE=<type>)
 MODEL_TYPE ?= classifier
 DATA_PATH  ?=
+LAT_COL    ?=
+LON_COL    ?=
 
 .DEFAULT_GOAL := help
 
@@ -32,27 +34,37 @@ install: venv ## Install all dependencies including dev extras
 	uv sync --extra dev
 
 # ─── Data ────────────────────────────────────────────────────────────────────
-preprocess: ## Preprocess default dataset (multiclass_clean.csv, non-spatial)
+preprocess:
+	$(PYTHON) scripts/preprocess_data.py
+
+preprocess-spatial:
+	SPATIAL=true $(PYTHON) scripts/preprocess_data.py
+
+preprocess-example: ## Preprocess default dataset (multiclass_clean.csv, non-spatial)
 	DATA_PATH=data/gvirm/multiclass_clean.csv LABEL_COL=ROCK1 \
 	  $(PYTHON) scripts/preprocess_data.py
 
-preprocess-spatial: ## Preprocess spatial dataset (Data1.csv)
+preprocess-spatial-example: ## Preprocess spatial dataset (Data1.csv)
 	DATA_PATH=data/gvirm/Data1.csv LABEL_COL=rock_name SPATIAL=true \
 	  $(PYTHON) scripts/preprocess_data.py
 
-preprocess-all: preprocess preprocess-spatial ## Preprocess both datasets
+preprocess-all-example: preprocess preprocess-spatial ## Preprocess both datasets
 
 # ─── Training ────────────────────────────────────────────────────────────────
-train-iforest: ## Train Isolation Forest  (multiclass_clean.csv)  [CONFIG=path/to/config.yml]
+train-iforest: ## Train Isolation Forest  (multiclass_clean.csv)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
+	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/multiclass_clean.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
 	$(PYTHON) scripts/train_isolation_forest.py $(if $(CONFIG),--config $(CONFIG),)
 
-train-autoencoder: ## Train spatial autoencoder  (Data1.csv + spatial features)  [CONFIG=path/to/config.yml]
+train-autoencoder: ## Train spatial autoencoder  (Data1.csv + spatial features)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
+	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/Data1.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
 	$(PYTHON) scripts/train_autoencoder.py --spatial $(if $(CONFIG),--config $(CONFIG),)
 
-train-classifier: ## Train multi-class classifier  (multiclass_clean.csv)  [CONFIG=path/to/config.yml]
+train-classifier: ## Train multi-class classifier  (multiclass_clean.csv)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
+	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/multiclass_clean.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
 	$(PYTHON) scripts/train_classifier.py $(if $(CONFIG),--config $(CONFIG),)
 
-train-cnn-sae: ## Train CNN-SAE spatial anomaly detector  (Data1.csv)  [CONFIG=path/to/config.yml]
+train-cnn-sae: ## Train CNN-SAE spatial anomaly detector  (Data1.csv)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
+	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/Data1.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
 	$(PYTHON) scripts/train_cnn_sae.py $(if $(CONFIG),--config $(CONFIG),)
 
 train-all: train-iforest train-autoencoder train-classifier train-cnn-sae ## Train all four models sequentially

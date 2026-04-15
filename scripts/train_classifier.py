@@ -13,11 +13,11 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, RobustScaler
+from sklearn.preprocessing import LabelEncoder
 
-from geochem_detect.config import load_config, model_params, training_params
-from geochem_detect.data.loader import feature_columns, load_multiclass
-from geochem_detect.data.preprocessor import make_splits, split_features_labels
+from geochem_detect.config import data_params, load_config, model_params, training_params
+from geochem_detect.data.loader import DEFAULT_MULTICLASS_DATA, load_dataset_frame
+from geochem_detect.data.preprocessor import make_splits, scale_features, split_features_labels
 from geochem_detect.training.trainer import train_classifier
 from geochem_detect.visualization.plots import (
     plot_class_distribution,
@@ -41,6 +41,7 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config("classifier", args.config)
+    data_cfg = data_params(cfg)
     mp = model_params(cfg)
     tp = training_params(cfg)
 
@@ -48,23 +49,35 @@ def main() -> None:
     if "hidden_dims" in mp:
         mp["hidden_dims"] = tuple(mp["hidden_dims"])
 
-    df = load_multiclass()
-    feat_cols = feature_columns("multiclass")
-    X_raw, y_raw, class_names, orig_idx = split_features_labels(df, feat_cols)
+    df, data_options = load_dataset_frame(data_cfg, DEFAULT_MULTICLASS_DATA)
+    feat_cols = data_options["feature_columns"]
+    X_raw, y_raw, class_names, _ = split_features_labels(
+        df,
+        feat_cols,
+        data_options["label_col"],
+        normalize_by=data_options["normalize_by"],
+    )
 
-    splits = make_splits(X_raw, y_raw, orig_idx)
+    splits = make_splits(X_raw, y_raw)
 
-    scaler = RobustScaler().fit(X_raw[splits["train_idx"]])
-    X_all_s = scaler.transform(X_raw).astype("float32")
+    (_, X_all_s), scaler = scale_features(
+        X_raw[splits["train_idx"]],
+        X_raw,
+        enabled=data_options["scale_features"],
+    )
 
     le = LabelEncoder()
     le.classes_ = class_names
 
     dataset_info = {
-        "dataset": "multiclass_clean.csv",
+        "dataset": data_options["data_path"],
         "feature_cols": feat_cols,
-        "label_col": "label",
+        "label_col": data_options["label_col"],
         "n_samples": len(X_raw),
+        "longitude": data_options["longitude"],
+        "latitude": data_options["latitude"],
+        "normalize_by": data_options["normalize_by"],
+        "scale_features": data_options["scale_features"],
     }
 
     params = {**mp, **tp}

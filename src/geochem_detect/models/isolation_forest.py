@@ -9,7 +9,8 @@ from sklearn.metrics import average_precision_score
 class IsolationForestDetector:
     """Thin wrapper around sklearn IsolationForest.
 
-    Anomaly score: higher value → more anomalous.
+    Anomaly score is the raw ``decision_function`` output.
+    Lower value → more anomalous, with the standard cutoff at 0.
     Binary label convention: 1 = anomaly, 0 = normal.
     """
 
@@ -40,17 +41,10 @@ class IsolationForestDetector:
         return ((raw == -1)).astype(int)
 
     def anomaly_scores(self, X: np.ndarray) -> np.ndarray:
-        """Return anomaly scores in [0, 1] (higher → more anomalous)."""
-        # decision_function: more negative → more anomalous
-        raw = self._model.decision_function(X)
-        # Normalise to [0, 1] with higher = more anomalous
-        shifted = -raw  # flip sign
-        mn, mx = shifted.min(), shifted.max()
-        if mx > mn:
-            return (shifted - mn) / (mx - mn)
-        return np.zeros_like(shifted)
+        """Return raw decision_function scores (lower → more anomalous)."""
+        return self._model.decision_function(X)
 
     def pr_auc(self, X: np.ndarray, y_true: np.ndarray) -> float:
         """Compute PR-AUC treating anomaly label=1 as the positive class."""
-        scores = self.anomaly_scores(X)
+        scores = -self.anomaly_scores(X)
         return float(average_precision_score(y_true, scores))

@@ -1,3 +1,19 @@
+data:
+  data_path: gvirm/multiclass_clean.csv
+  feature_columns:
+    - SIO2(WT%)
+    - TIO2(WT%)
+    - AL2O3(WT%)
+    - FEOT(WT%)
+    - CAO(WT%)
+    - MGO(WT%)
+    - MNO(WT%)
+    - K2O(WT%)
+    - NA2O(WT%)
+    - P2O5(WT%)
+  scale_features: true
+  # normalize_by: some_reference_column
+
 # Default hyperparameters for IsolationForestDetector
 # These values are also the class defaults in models/isolation_forest.py
 
@@ -14,5 +30,9 @@ model:
 # Fraction of the full dataset used to define "rare" classes for anomaly labelling.
 # A class is flagged as anomalous if its count is below contamination_threshold * N.
 # At 0.01: threshold = 38 members -> 76 rare classes -> 9.7% of points anomalous.
-training:
-  contamination_threshold: 0.01
+evaluation:
+  contamination_threshold: 0.05
+  # Alternatively, specify exact label values directly:
+  # anomaly_labels: ["label_a", "label_b"]
+  # Isolation Forest labels anomalies when decision_function < cutoff.
+  cutoff: 0.0

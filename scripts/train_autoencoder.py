@@ -16,10 +16,10 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, RobustScaler
 
-from geochem_detect.config import load_config, model_params, training_params
-from geochem_detect.data.loader import feature_columns, load_spatial
-from geochem_detect.data.preprocessor import make_splits, split_features_labels
-from geochem_detect.training.trainer import train_autoencoder
+from geochem_detect.config import data_params, evaluation_params, load_config, model_params, training_params
+from geochem_detect.data.loader import DEFAULT_SPATIAL_DATA, load_spatial_frame
+from geochem_detect.data.preprocessor import make_splits, prepare_labeled_frame, scale_features
+from geochem_detect.training.trainer import resolve_anomaly_ground_truth, train_autoencoder
 from geochem_detect.visualization.plots import (
     plot_anomaly_scores_histogram,
     plot_pr_curve_binary,
@@ -52,38 +52,51 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config("autoencoder", args.config)
+    data_cfg = data_params(cfg)
     mp = model_params(cfg)
     tp = training_params(cfg)
+    ep = evaluation_params(cfg)
 
     # CLI spatial flag takes precedence over config
     use_spatial = tp.get("spatial", False) if args.spatial is None else args.spatial
     tp["spatial"] = use_spatial
 
-    gdf = load_spatial()
-    feat_cols = feature_columns("spatial")
-    X_raw, y_raw, class_names, orig_idx = split_features_labels(gdf, feat_cols)
+    gdf, data_options = load_spatial_frame(data_cfg, DEFAULT_SPATIAL_DATA)
+    gdf_clean, feat_cols = prepare_labeled_frame(
+        gdf,
+        data_options["feature_columns"],
+        data_options["label_col"],
+        normalize_by=data_options["normalize_by"],
+    )
 
-    splits = make_splits(X_raw, y_raw, orig_idx)
-
-    scaler = RobustScaler().fit(X_raw[splits["train_idx"]])
-    X_all_s = scaler.transform(X_raw).astype("float32")
-
+    X_raw = gdf_clean[feat_cols].to_numpy(dtype=np.float32)
     le = LabelEncoder()
-    le.classes_ = class_names
+    y_raw = le.fit_transform(gdf_clean[data_options["label_col"]].values)
+
+    splits = make_splits(X_raw, y_raw)
+
+    ( _, X_all_s), scaler = scale_features(
+        X_raw[splits["train_idx"]],
+        X_raw,
+        enabled=data_options["scale_features"],
+    )
 
     X_spatial = None
     if use_spatial:
-        gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
-        coords = gdf_clean[["lat", "long"]].values.astype(np.float32)
+        coords = gdf_clean[[data_options["latitude"], data_options["longitude"]]].values.astype(np.float32)
         sp_scaler = RobustScaler().fit(coords[splits["train_idx"]])
         X_spatial = sp_scaler.transform(coords).astype(np.float32)
 
     dataset_info = {
-        "dataset": "Data1.csv",
+        "dataset": data_options["data_path"],
         "feature_cols": feat_cols,
-        "label_col": "label",
+        "label_col": data_options["label_col"],
         "n_samples": len(X_raw),
         "spatial": use_spatial,
+        "longitude": data_options["longitude"],
+        "latitude": data_options["latitude"],
+        "normalize_by": data_options["normalize_by"],
+        "scale_features": data_options["scale_features"],
     }
 
     params = {**mp, **tp}
@@ -91,18 +104,17 @@ def main() -> None:
         X_all_s, y_raw, splits, le, scaler, dataset_info,
         X_spatial=X_spatial,
         params=params,
+        evaluation=ep,
         run_name="data1_spatial" if use_spatial else "data1_chem_only",
     )
 
     out_dir = OUTPUT_ROOT / "autoencoder" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    sigma_cutoff = tp.get("anomaly_sigma_cutoff", 2.0)
-    contamination = tp.get("contamination_threshold", 0.05)
-    classes_all, counts_all = np.unique(y_raw, return_counts=True)
-    rare = classes_all[counts_all < int(contamination * len(y_raw))]
-
-    gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
+    y_anom_all, _, _ = resolve_anomaly_ground_truth(y_raw, le, ep)
+    sigma_cutoff = ep.get("anomaly_sigma_cutoff", 2.0)
+    if y_anom_all is None:
+        print("  Evaluation plots skipped where ground-truth anomalies are required")
 
     # ── Calibrate threshold on the validation set ────────────────────────────
     # ── Score ALL points at once for globally consistent normalization ────────
@@ -130,17 +142,17 @@ def main() -> None:
     }
 
     for split_name, idx in named_splits.items():
-        y_anom = np.isin(y_raw[idx], rare).astype(int)
-
         # Slice pre-computed global scores so normalization is consistent
         scores    = all_scores[idx]
         title_sfx = f"({split_name})"
 
-        plot_pr_curve_binary(
-            y_anom, scores,
-            title=f"Precision-Recall Curve {title_sfx}",
-            save_path=out_dir / f"pr_curve_autoencoder_{split_name}.png",
-        )
+        if y_anom_all is not None:
+            y_anom = y_anom_all[idx]
+            plot_pr_curve_binary(
+                y_anom, scores,
+                title=f"Precision-Recall Curve {title_sfx}",
+                save_path=out_dir / f"pr_curve_autoencoder_{split_name}.png",
+            )
         plot_anomaly_scores_histogram(
             scores, sigma_cutoff=sigma_cutoff,
             title=f"Anomaly Score Distribution {title_sfx}",
@@ -151,11 +163,11 @@ def main() -> None:
         plot_spatial_anomalies(
             gdf_split, scores,
             threshold=threshold,
-            y_true=y_anom,
+            y_true=y_anom_all[idx] if y_anom_all is not None else None,
             title=f"Spatial Anomaly Map {title_sfx}",
             save_path=out_dir / f"spatial_anomaly_map_{split_name}.png",
             raw_gdf=gdf_split,
-            raw_y=y_anom,
+            raw_y=y_anom_all[idx] if y_anom_all is not None else None,
         )
 
     print(f"Plots saved to {out_dir}/")

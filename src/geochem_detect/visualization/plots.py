@@ -87,6 +87,9 @@ def plot_anomaly_scores_histogram(
     title: str = "Anomaly Score Distribution",
     save_path: str | Path | None = None,
     threshold: float | None = None,
+    threshold_label: str | None = None,
+    x_label: str = "Anomaly Score",
+    show_sigma_guides: bool = True,
 ) -> plt.Figure:
     """Histogram of anomaly scores with per-sigma reference lines and cutoff.
 
@@ -114,21 +117,24 @@ def plot_anomaly_scores_histogram(
     std  = float(np.std(scores))
     if threshold is None:
         threshold = mean + sigma_cutoff * std
-        cutoff_label = f"Cutoff (mean + {sigma_cutoff:.1f}\u03c3 = {threshold:.3f})"
+        cutoff_label = threshold_label or (
+            f"Cutoff (mean + {sigma_cutoff:.1f}\u03c3 = {threshold:.3f})"
+        )
     else:
-        cutoff_label = f"Val threshold = {threshold:.3f}"
+        cutoff_label = threshold_label or f"Val threshold = {threshold:.3f}"
 
     # Grey dotted lines at each whole-sigma within the visible range
-    max_sigma = int(np.ceil(abs(sigma_cutoff))) + 1
-    for s in range(1, max_sigma + 1):
-        for sign in (1, -1):
-            x = mean + sign * s * std
-            if scores.min() <= x <= scores.max():
-                ax.axvline(
-                    x,
-                    color="grey", linestyle=":", linewidth=0.9, alpha=0.7,
-                    label=f"{'+' if sign > 0 else '-'}{s}σ",
-                )
+    if show_sigma_guides:
+        max_sigma = int(np.ceil(abs(sigma_cutoff))) + 1
+        for s in range(1, max_sigma + 1):
+            for sign in (1, -1):
+                x = mean + sign * s * std
+                if scores.min() <= x <= scores.max():
+                    ax.axvline(
+                        x,
+                        color="grey", linestyle=":", linewidth=0.9, alpha=0.7,
+                        label=f"{'+' if sign > 0 else '-'}{s}σ",
+                    )
 
     # Mean and cutoff
     ax.axvline(mean, color="black", linestyle="-", linewidth=1.0, alpha=0.7,
@@ -140,14 +146,14 @@ def plot_anomaly_scores_histogram(
     handles, labels = ax.get_legend_handles_labels()
     seen: set[str] = set()
     unique: list = []
-    for h, l in zip(handles, labels):
-        if l not in seen:
-            seen.add(l)
-            unique.append((h, l))
+    for handle, label in zip(handles, labels):
+        if label not in seen:
+            seen.add(label)
+            unique.append((handle, label))
     if unique:
         ax.legend(*zip(*unique), fontsize=8)
 
-    ax.set_xlabel("Anomaly Score")
+    ax.set_xlabel(x_label)
     ax.set_ylabel("Count")
     ax.set_title(title)
     plt.tight_layout()

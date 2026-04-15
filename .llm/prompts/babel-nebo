@@ -1,0 +1,31 @@
+Model: GPT-5.4
+
+Prompt 1
+
+Let's expand the preprocess_data.py utilities to 1) fix *negative* values in feature columns by the transform x --> -0.5*x and 2) support the label column being optional.
+
+Prompt 2
+
+Update the train-* make targets and the scripts they call (geochem_detect/scripts/train_*.py) support a data path env variable DATA_PATH. The defaults in the makefile should match the dataset that is currently hard-coded.
+
+The train scripts should use a common utility to check the data path. If the path DATA_PATH is provided and is absolute, the script should identify that and support it, else it should default to expecting the path to be under geochem_detect/data/processed) and check that it exists and fail gracefully.
+
+Prompt 3
+
+We define y_anom using a contamination threshhold for anomaly detection evaluation. We want to add an additional method for defining ground truth anomalous events. Rather than determining rare classes from the count of the class, we should be able to directly supply values for the label column in the config yaml file via training.anomaly_labels (ie, we define the variable `rare` directly). The presence of either training.contamination_threshold or training.anomaly_labels determines which to use for evaluation in the training scripts. Also, since y_anom is used in evaluation and not training, change the config `training.contamination_threshold` and `training.anomaly_sigma_cutoff` to `evaluation.contamination_threshold` and `evaluation.anomaly_sigma_cutoff` (and `evaluation.anomaly_labels). Additionally, make these evaluation parameters optional. We do not perform the evaluation if neither anomaly_labels or contamination_threshold is supplied.
+
+Prompt 4
+
+Make sure we always plot figures that do not depend on y_anom. The last revision changed this. I fixed it by hand for train_isolation_forest.
+
+Prompt 5
+
+Let's fix 2 inconsistencies for anomaly detection evaluation.
+
+1. For the isolation forest model, we want to follow standard practice and return decision_function output directly as the anomaly score. After training, instead of plotting a histogram of the anomaly score as it's currently calculated, plot a histogram of the decision_function. Note in the plot the cutoff (default zero) for labeling anomalous data. Make the cutoff set-able in the isolation forest config under `evaluation.cutoff`.
+
+2. For the cnn_sae model, we want to follow the pattern in the autoencoder model and determine the threshold for labeling anomalous data using the validation split.
+
+Prompt 6
+
+

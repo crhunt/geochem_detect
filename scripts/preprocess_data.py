@@ -13,8 +13,9 @@ OUT_PATH        Path to write the cleaned CSV.
                 "data/" segment of DATA_PATH (e.g. data/gvirm/x.csv →
                 data/processed/gvirm/x.csv).
 
-LABEL_COL       Column name for the rock/class label.
+LABEL_COL       Optional column name for the rock/class label.
                 Default: rock_name  (matches Data1.csv)
+                Set to an empty string or "none" to disable label handling.
 
 SPATIAL         Set to "true" / "1" / "yes" to enable spatial processing.
                 Default: false
@@ -28,6 +29,11 @@ LON_COL         Column name for longitude (only used when SPATIAL=true).
 COLS_FILE       Optional path to a plain-text file listing feature column names,
                 one per line.  When omitted, feature columns are auto-detected as
                 every column that is not the label column or a coordinate column.
+
+FEATURE_COLUMNS Optional comma-separated list of feature column names.
+                Takes precedence over COLS_FILE when set.
+
+Negative feature values are remapped with x --> -0.5*x after numeric coercion.
 
 Usage examples
 --------------
@@ -60,11 +66,17 @@ DATA_PATH: Path = Path(os.environ.get("DATA_PATH", "data/gvirm/multiclass_clean.
 if not DATA_PATH.is_absolute():
     DATA_PATH = _PROJECT_ROOT / DATA_PATH
 
-LABEL_COL: str = os.environ.get("LABEL_COL", "rock_name")
+_label_col_env = os.environ.get("LABEL_COL", "rock_name").strip()
+LABEL_COL: str | None = None if _label_col_env.lower() in {"", "none"} else _label_col_env
 SPATIAL:   bool = os.environ.get("SPATIAL", "false").strip().lower() in ("true", "1", "yes")
 LAT_COL:   str = os.environ.get("LAT_COL", "lat")
 LON_COL:   str = os.environ.get("LON_COL", "long")
 COLS_FILE: Path | None = Path(os.environ["COLS_FILE"]) if "COLS_FILE" in os.environ else None
+FEATURE_COLUMNS: list[str] | None = None
+if "FEATURE_COLUMNS" in os.environ:
+    FEATURE_COLUMNS = [
+        col.strip() for col in os.environ["FEATURE_COLUMNS"].split(",") if col.strip()
+    ]
 
 
 def _derive_out_path(src: Path) -> Path:
@@ -89,6 +101,13 @@ if not OUT_PATH.is_absolute():
 
 def _load_feature_cols(df: pd.DataFrame) -> list[str]:
     """Return feature column names, from COLS_FILE or auto-detected."""
+    if FEATURE_COLUMNS is not None:
+        missing = [col for col in FEATURE_COLUMNS if col not in df.columns]
+        if missing:
+            sys.exit(f"ERROR: columns from FEATURE_COLUMNS not found in data: {missing}")
+        print(f"  Feature columns loaded from FEATURE_COLUMNS  ({len(FEATURE_COLUMNS)} columns)")
+        return FEATURE_COLUMNS
+
     if COLS_FILE is not None:
         if not COLS_FILE.exists():
             sys.exit(f"ERROR: COLS_FILE not found: {COLS_FILE}")
@@ -100,12 +119,44 @@ def _load_feature_cols(df: pd.DataFrame) -> list[str]:
         return cols
 
     # Auto-detect: all columns except the reserved ones
-    reserved = {LABEL_COL, "label"}
-    if SPATIAL:
-        reserved |= {LAT_COL, LON_COL}
+    reserved = {"label"}
+    if LABEL_COL is not None:
+        reserved.add(LABEL_COL)
+    reserved |= {LAT_COL, LON_COL}
     cols = [c for c in df.columns if c not in reserved]
     print(f"  Feature columns auto-detected  ({len(cols)} columns): {cols}")
     return cols
+
+
+def _prepare_label_column(df: pd.DataFrame, raw_path: Path) -> pd.DataFrame:
+    """Normalize the optional label column to the canonical 'label' name."""
+    if LABEL_COL is None:
+        print("  Label   : disabled")
+        return df
+
+    if LABEL_COL not in df.columns:
+        if "label" in df.columns:
+            print("  Label   : using existing 'label' column")
+            df["label"] = df["label"].astype("string").str.strip()
+            return df[df["label"].notna() & (df["label"] != "")]
+        print(f"  Label   : '{LABEL_COL}' not found, continuing without labels")
+        return df
+
+    df = df.rename(columns={LABEL_COL: "label"})
+    df["label"] = df["label"].astype("string").str.strip()
+    return df[df["label"].notna() & (df["label"] != "")]
+
+
+def _fix_negative_feature_values(df: pd.DataFrame, feat_cols: list[str]) -> pd.DataFrame:
+    """Remap negative feature values with x --> -0.5*x."""
+    negative_mask = df[feat_cols] < 0
+    negative_count = int(negative_mask.sum().sum())
+    if negative_count:
+        df.loc[:, feat_cols] = df[feat_cols].mask(negative_mask, -0.5 * df[feat_cols])
+        print(f"  Negative feature values remapped: {negative_count}")
+    else:
+        print("  Negative feature values remapped: 0")
+    return df
 
 
 def _report(name: str, before: int, after: int) -> None:
@@ -126,15 +177,7 @@ def preprocess(raw_path: Path, out_path: Path) -> None:
     df.columns = df.columns.str.strip()
     before = len(df)
 
-    # Rename label column → "label"
-    if LABEL_COL not in df.columns:
-        sys.exit(
-            f"ERROR: label column '{LABEL_COL}' not found in {raw_path}.\n"
-            f"Available columns: {list(df.columns)}"
-        )
-    df = df.rename(columns={LABEL_COL: "label"})
-    df["label"] = df["label"].str.strip()
-    df = df[df["label"].notna() & (df["label"] != "")]
+    df = _prepare_label_column(df, raw_path)
 
     # Validate coordinate columns when spatial
     if SPATIAL:
@@ -151,10 +194,22 @@ def preprocess(raw_path: Path, out_path: Path) -> None:
     for col in feat_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    required = feat_cols + ["label"]
+    df = _fix_negative_feature_values(df, feat_cols)
+
+    required = list(feat_cols)
+    if "label" in df.columns:
+        required.append("label")
     if SPATIAL:
         required += [LAT_COL, LON_COL]
     df = df.dropna(subset=required).reset_index(drop=True)
+
+    keep_cols = list(feat_cols)
+    if "label" in df.columns:
+        keep_cols.insert(0, "label")
+    for column_name in (LAT_COL, LON_COL):
+        if column_name in df.columns and column_name not in keep_cols:
+            keep_cols.append(column_name)
+    df = df[keep_cols].copy()
 
     _report(name, before, len(df))
 

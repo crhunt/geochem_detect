@@ -132,3 +132,4 @@ I don't think this solves the issue. The plots showing spatial anomaly map seem 
 Prompt 11
 
 The plotting issue still remains, or there is a new one. The plot that should show "all" data points and anomaly detected for the CNN-SAE model shows fewer anomalies detected that the "train" plot. Each plot should show ONLY data related to that split: Normal (ground truth) datapoints used in windows in that split, Anomaly (ground truth) datapoints used in windows in that split, Anomaly detected (model) center of window for samples in that split.
+

@@ -65,26 +65,24 @@ def _load_model(run_id: str, model_type: str):
 def _load_data(info: dict, data_path: str | None) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Load the dataset referenced in dataset_info (or --data-path override),
     returning (X_raw, y_raw, feat_cols) without scaling."""
+    from geochem_detect.data.loader import load_dataset_frame
     from geochem_detect.data.preprocessor import split_features_labels
 
-    feat_cols: list[str] = info["feature_cols"]
-    label_col: str = info["label_col"]
-
-    if data_path:
-        df = pd.read_csv(data_path, encoding="utf-8-sig")
-        df.columns = df.columns.str.strip()
-        if label_col not in df.columns:
-            raise ValueError(f"Column '{label_col}' not found in {data_path}")
-    else:
-        dataset = info["dataset"]
-        if dataset == "multiclass_clean.csv":
-            from geochem_detect.data.loader import load_multiclass
-            df = load_multiclass()
-        else:
-            from geochem_detect.data.loader import load_spatial
-            df = load_spatial()
-
-    X, y, class_names, orig_idx = split_features_labels(df, feat_cols, label_col)
+    data_cfg = {
+        "data_path": data_path or info["dataset"],
+        "feature_columns": info["feature_cols"],
+        "longitude": info.get("longitude"),
+        "latitude": info.get("latitude"),
+        "normalize_by": info.get("normalize_by"),
+        "scale_features": info.get("scale_features", True),
+    }
+    df, data_options = load_dataset_frame(data_cfg, info["dataset"])
+    X, y, class_names, orig_idx = split_features_labels(
+        df,
+        data_options["feature_columns"],
+        data_options["label_col"],
+        normalize_by=data_options["normalize_by"],
+    )
     return X, y, list(class_names), orig_idx
 
 
@@ -104,7 +102,12 @@ def _predict_anomaly(model, X_s: np.ndarray, model_type: str, art_dir: Path) -> 
         det = IsolationForestDetector.__new__(IsolationForestDetector)
         det._model = model
         scores = det.anomaly_scores(X_s)
-        flags  = det.predict(X_s)
+        threshold_file = art_dir / "anomaly_threshold.json"
+        cutoff = 0.0
+        if threshold_file.exists():
+            cfg = json.loads(threshold_file.read_text())
+            cutoff = float(cfg.get("cutoff", 0.0))
+        flags = (scores < cutoff).astype(int)
     else:
         # Compute normalised anomaly scores
         preds = model.predict(X_s, verbose=0)

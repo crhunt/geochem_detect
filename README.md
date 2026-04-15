@@ -24,7 +24,8 @@ make venv       # or: uv sync
 
 ### 2. Preprocess data
 
-Raw data lives under `data/gvirm/`. Processed output mirrors the source layout under `data/processed/gvirm/`.
+Raw data lives under `data/<dataset name>`. Processed output mirrors the source layout under `data/processed/<dataset name>/`.
+The preprocessing script also supports unlabeled CSVs and remaps negative feature values with `x -> -0.5*x` before writing output.
 
 ```bash
 make preprocess          # multiclass_clean.csv  (non-spatial)

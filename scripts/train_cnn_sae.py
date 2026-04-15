@@ -10,10 +10,9 @@ All hyperparameters are read from the config file (or the bundled default when
 tuneable settings.
 
 The model ingests spatially-windowed samples from Data1.csv, where each window
-is a ``grid_size × grid_size`` grid of geochemical features.  Anomaly ground
-truth is derived from label frequency: rock classes whose global count falls
-below ``contamination_threshold × N`` are considered anomalous, and a window is
-anomalous if it contains at least one anomalous source point.
+is a ``grid_size × grid_size`` grid of geochemical features. Evaluation can use
+either explicit anomalous label values or frequency-derived anomalies when an
+``evaluation`` config block is provided.
 """
 from __future__ import annotations
 
@@ -21,12 +20,12 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, RobustScaler
+from sklearn.preprocessing import LabelEncoder
 
-from geochem_detect.config import load_config, model_params, sampling_params, training_params
-from geochem_detect.data.loader import FEATURE_COLS_SPATIAL, load_spatial
-from geochem_detect.data.preprocessor import split_features_labels
-from geochem_detect.training.trainer import train_cnn_sae
+from geochem_detect.config import data_params, evaluation_params, load_config, model_params, sampling_params, training_params
+from geochem_detect.data.loader import DEFAULT_SPATIAL_DATA, load_spatial_frame
+from geochem_detect.data.preprocessor import prepare_labeled_frame, scale_features
+from geochem_detect.training.trainer import resolve_anomaly_ground_truth, train_cnn_sae
 from geochem_detect.visualization.plots import (
     plot_anomaly_scores_histogram,
     plot_pr_curve_binary,
@@ -67,38 +66,49 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config("cnn_sae", args.config)
+    data_cfg = data_params(cfg)
     mp = model_params(cfg)
     tp = training_params(cfg)
+    ep = evaluation_params(cfg)
     sp = sampling_params(cfg)
 
     # ── Load and clean data ──────────────────────────────────────────────────
-    gdf = load_spatial(args.data_path)
-    feat_cols = FEATURE_COLS_SPATIAL
+    if args.data_path is not None:
+        data_cfg = dict(data_cfg)
+        data_cfg["data_path"] = args.data_path
+    gdf, data_options = load_spatial_frame(data_cfg, DEFAULT_SPATIAL_DATA)
+    gdf_clean, feat_cols = prepare_labeled_frame(
+        gdf,
+        data_options["feature_columns"],
+        data_options["label_col"],
+        normalize_by=data_options["normalize_by"],
+    )
 
-    # split_features_labels drops NaN rows and returns positional indices
-    X_raw, y_raw, class_names, orig_idx = split_features_labels(gdf, feat_cols)
-
-    # Align GeoDataFrame to the cleaned rows
-    gdf_clean = gdf.dropna(subset=feat_cols).reset_index(drop=True)
+    X_raw = gdf_clean[feat_cols].to_numpy(dtype=np.float32)
+    le = LabelEncoder()
+    y_raw = le.fit_transform(gdf_clean[data_options["label_col"]].values)
 
     # Scale features — fit on all data (consistent with spatial windowing where
     # we cannot do a geographic train split before sampling)
-    scaler = RobustScaler().fit(X_raw)
-    X_scaled = scaler.transform(X_raw).astype("float32")
+    (X_scaled,), scaler = scale_features(
+        X_raw,
+        enabled=data_options["scale_features"],
+    )
 
     # Write scaled features back into the GeoDataFrame columns so that
     # SpatialSampler reads the already-normalised values
     gdf_clean = gdf_clean.copy()
     gdf_clean[feat_cols] = X_scaled
 
-    le = LabelEncoder()
-    le.classes_ = class_names
-
     dataset_info = {
-        "dataset": "Data1.csv",
+        "dataset": data_options["data_path"],
         "feature_cols": feat_cols,
-        "label_col": "label",
+        "label_col": data_options["label_col"],
         "n_samples": len(X_raw),
+        "longitude": data_options["longitude"],
+        "latitude": data_options["latitude"],
+        "normalize_by": data_options["normalize_by"],
+        "scale_features": data_options["scale_features"],
     }
 
     params = {**mp, **tp}
@@ -110,6 +120,7 @@ def main() -> None:
         dataset_info,
         sampling_params=sp,
         params=params,
+        evaluation=ep,
         experiment_name=args.experiment,
         run_name=args.run_name or "data1_cnn_sae",
     )
@@ -120,12 +131,16 @@ def main() -> None:
     out_dir = OUTPUT_ROOT / "cnn_sae" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    sigma_cutoff   = tp.get("anomaly_sigma_cutoff", 2.0)
-    contamination  = tp.get("contamination_threshold", 0.05)
-    classes_all, counts_all = np.unique(y_raw, return_counts=True)
-    rare = classes_all[counts_all < int(contamination * len(y_raw))]
+    y_anom_all, _, _ = resolve_anomaly_ground_truth(y_raw, le, ep)
+    sigma_cutoff = ep.get("anomaly_sigma_cutoff", 2.0)
+    if y_anom_all is None:
+        print("  Evaluation plots skipped where ground-truth anomalies are required")
     # Per-point ground-truth anomaly labels (used for raw-data-point overlay)
-    raw_anom_labels = np.isin(y_raw, rare).astype(np.int32)
+    raw_anom_labels = (
+        y_anom_all.astype(np.int32)
+        if y_anom_all is not None
+        else np.zeros(len(y_raw), dtype=np.int32)
+    )
 
     # Reload window splits and metadata from saved artefacts
     art_dir = out_dir / "artefacts"
@@ -152,19 +167,20 @@ def main() -> None:
     # keeps the scale consistent across all per-split slices.
     all_scores = det.anomaly_scores(X_all)
 
-    # ── Calibrate threshold in global score-space on the validation windows ──
-    val_idx_saved = splits_npz["val_idx"]
-    val_scores = all_scores[val_idx_saved]
-    threshold = float(np.mean(val_scores) + sigma_cutoff * np.std(val_scores))
-
-    # Update the saved anomaly_threshold.json with the calibrated value
-    with open(art_dir / "anomaly_threshold.json") as f:
-        threshold_data = json.load(f)
-    threshold_data["threshold"] = threshold
-    with open(art_dir / "anomaly_threshold.json", "w") as f:
-        json.dump(threshold_data, f, indent=2)
-    print(f"  [CNN-SAE] val threshold = {threshold:.4f} "
-          f"(mean={np.mean(val_scores):.4f}, sigma_cutoff={sigma_cutoff})")
+    threshold = None
+    if sigma_cutoff is not None:
+        threshold_file = art_dir / "anomaly_threshold.json"
+        threshold_data = json.loads(threshold_file.read_text()) if threshold_file.exists() else {}
+        threshold = threshold_data.get("threshold")
+        if threshold is None:
+            val_idx_saved = splits_npz["val_idx"]
+            val_scores = all_scores[val_idx_saved]
+            threshold = float(np.mean(val_scores) + sigma_cutoff * np.std(val_scores))
+            threshold_data["sigma_cutoff"] = sigma_cutoff
+            threshold_data["threshold"] = threshold
+            threshold_file.write_text(json.dumps(threshold_data, indent=2))
+            print(f"  [CNN-SAE] val threshold = {threshold:.4f} "
+                  f"(mean={np.mean(val_scores):.4f}, sigma_cutoff={sigma_cutoff})")
 
     named_splits = {
         "train": splits_npz["train_idx"],
@@ -178,17 +194,17 @@ def main() -> None:
     }
 
     for split_name, idx in named_splits.items():
-        y_anom = y_all[idx]
-
         # Slice pre-computed global scores so normalization is consistent
         scores = all_scores[idx]
         title_sfx = f"({split_name})"
 
-        plot_pr_curve_binary(
-            y_anom, scores,
-            title=f"Precision-Recall Curve {title_sfx}",
-            save_path=out_dir / f"pr_curve_cnn_sae_{split_name}.png",
-        )
+        if y_anom_all is not None:
+            y_anom = y_all[idx]
+            plot_pr_curve_binary(
+                y_anom, scores,
+                title=f"Precision-Recall Curve {title_sfx}",
+                save_path=out_dir / f"pr_curve_cnn_sae_{split_name}.png",
+            )
         plot_anomaly_scores_histogram(
             scores, sigma_cutoff=sigma_cutoff,
             title=f"Anomaly Score Distribution {title_sfx}",
@@ -221,12 +237,12 @@ def main() -> None:
         plot_spatial_anomalies(
             window_gdf, scores,
             threshold=threshold,
-            y_true=y_anom,
+            y_true=y_all[idx] if y_anom_all is not None else None,
             title=f"Spatial Anomaly Map {title_sfx}",
             save_path=out_dir / f"spatial_anomaly_map_cnn_sae_{split_name}.png",
             window_deg=sp["window_deg"],
             raw_gdf=gdf_clean.iloc[split_pt_idx],
-            raw_y=raw_anom_labels[split_pt_idx],
+            raw_y=raw_anom_labels[split_pt_idx] if y_anom_all is not None else None,
         )
 
     print(f"Plots saved to {out_dir}/")

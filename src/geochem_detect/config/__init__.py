@@ -40,17 +40,20 @@ def load_config(model_type: str, config_path: str | Path | None = None) -> dict:
 
     # Start from the default so custom configs only need to override what changes
     default_path = _DEFAULT_CONFIGS[model_type]
-    with open(default_path) as f:
-        cfg = yaml.safe_load(f)
+    with open(default_path, encoding="utf-8") as config_file:
+        cfg = yaml.safe_load(config_file)
 
     if config_path is not None:
         path = Path(config_path)
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
-        with open(path) as f:
-            overrides = yaml.safe_load(f) or {}
+        with open(path, encoding="utf-8") as config_file:
+            overrides = yaml.safe_load(config_file) or {}
         # Deep-merge: override section by section
         for section, values in overrides.items():
+            if section == "evaluation" and values in (None, {}):
+                cfg[section] = {}
+                continue
             if section in cfg and isinstance(cfg[section], dict):
                 cfg[section].update(values)
             else:
@@ -75,6 +78,16 @@ def model_params(cfg: dict) -> dict:
 def training_params(cfg: dict) -> dict:
     """Extract the ``training`` section of a loaded config dict."""
     return dict(cfg.get("training", {}))
+
+
+def data_params(cfg: dict) -> dict:
+    """Extract the top-level ``data`` section of a loaded config dict."""
+    return dict(cfg.get("data", {}))
+
+
+def evaluation_params(cfg: dict) -> dict:
+    """Extract the ``evaluation`` section of a loaded config dict."""
+    return dict(cfg.get("evaluation", {}))
 
 
 def sampling_params(cfg: dict) -> dict:

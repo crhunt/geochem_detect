@@ -198,43 +198,77 @@ def plot_spatial_anomalies(
         to convey the spatial scale of each sample.
     raw_gdf:
         Optional GeoDataFrame of the original individual data points (not window
-        centres).  When provided together with *raw_y*, each point is plotted as
-        a small dot coloured by its ground-truth anomaly status.
+        centres). When provided without *raw_y*, all points are plotted with a
+        neutral "Data" label. When provided together with *raw_y*, each point
+        is plotted as a small dot coloured by its ground-truth anomaly status.
     raw_y:
         Per-point binary ground-truth labels aligned with *raw_gdf* rows
         (1 = anomalous, 0 = normal).
     """
     fig, ax = plt.subplots(figsize=(10, 7))
+    scores_arr = np.asarray(scores, dtype=float)
     mask_anomaly = scores >= threshold
 
-    # Layer 1: original data points coloured by ground-truth anomaly status
-    if raw_gdf is not None and raw_y is not None:
-        raw_y_arr = np.asarray(raw_y, dtype=int)
-        raw_normal  = raw_gdf[raw_y_arr == 0]
-        raw_anomaly = raw_gdf[raw_y_arr == 1]
-        if len(raw_normal) > 0:
-            ax.scatter(
-                raw_normal.geometry.x.values,
-                raw_normal.geometry.y.values,
-                s=8, color="steelblue", alpha=0.4,
-                label="Normal (ground truth)", zorder=2,
-            )
-        if len(raw_anomaly) > 0:
-            ax.scatter(
-                raw_anomaly.geometry.x.values,
-                raw_anomaly.geometry.y.values,
-                s=8, color="firebrick", alpha=0.6,
-                label="Anomaly (ground truth)", zorder=3,
-            )
+    # Layer 1: original data points, optionally coloured by ground-truth anomaly status
+    if raw_gdf is not None:
+        if raw_y is None:
+            if len(raw_gdf) > 0:
+                ax.scatter(
+                    raw_gdf.geometry.x.values,
+                    raw_gdf.geometry.y.values,
+                    s=8,
+                    color="steelblue",
+                    alpha=0.4,
+                    label="Data",
+                    zorder=2,
+                )
+        else:
+            raw_y_arr = np.asarray(raw_y, dtype=int)
+            raw_normal = raw_gdf[raw_y_arr == 0]
+            raw_anomaly = raw_gdf[raw_y_arr == 1]
+            if len(raw_normal) > 0:
+                ax.scatter(
+                    raw_normal.geometry.x.values,
+                    raw_normal.geometry.y.values,
+                    s=8,
+                    color="steelblue",
+                    alpha=0.4,
+                    label="Normal (ground truth)",
+                    zorder=2,
+                )
+            if len(raw_anomaly) > 0:
+                ax.scatter(
+                    raw_anomaly.geometry.x.values,
+                    raw_anomaly.geometry.y.values,
+                    s=12,
+                    color="firebrick",
+                    alpha=0.8,
+                    label="Anomaly (ground truth)",
+                    zorder=3,
+                )
 
-    # Layer 2: model-predicted anomalous window centres as transparent red diamonds
+    # Layer 2: model-predicted anomalous window centres sized by detected-score rank
     det_anomaly = gdf[mask_anomaly]
     if len(det_anomaly) > 0:
+        det_scores = scores_arr[mask_anomaly]
+        det_min = float(np.min(det_scores))
+        det_max = float(np.max(det_scores))
+        if det_max > det_min:
+            det_scores_norm = (det_scores - det_min) / (det_max - det_min)
+        else:
+            det_scores_norm = np.zeros_like(det_scores)
+        det_sizes = 40.0 + 180.0 * det_scores_norm
         ax.scatter(
             det_anomaly.geometry.x.values,
             det_anomaly.geometry.y.values,
-            marker="D", s=60, facecolors="none", edgecolors="red", linewidths=1.2,
-            alpha=0.9, label="Anomaly detected (model)", zorder=5,
+            marker="D",
+            s=det_sizes,
+            facecolors="none",
+            edgecolors="salmon",
+            linewidths=1.5,
+            alpha=0.7,
+            label="Anomaly detected (model)",
+            zorder=5,
         )
 
     # Window-level prediction statistics (requires window ground-truth labels)

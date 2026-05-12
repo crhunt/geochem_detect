@@ -12,6 +12,16 @@ import numpy as np
 OUTPUT_ROOT = Path(__file__).parents[3] / "outputs"
 
 
+def _save_keras_model(model, path: str | Path) -> None:
+    """Save a Keras model to disk."""
+    model.save(str(path))
+
+
+def _mlflow_log_keras_model(model, artifact_path: str) -> None:
+    """Log a Keras model to MLflow."""
+    mlflow.tensorflow.log_model(model, artifact_path=artifact_path)
+
+
 def _log_params(params: dict[str, Any]) -> None:
     for k, v in params.items():
         mlflow.log_param(k, v)
@@ -260,7 +270,7 @@ def train_autoencoder(
         mlflow.log_metric("val_size",   len(va))
         mlflow.log_metric("test_size",  len(te))
 
-        mlflow.tensorflow.log_model(det.model, artifact_path="autoencoder_model")
+        _mlflow_log_keras_model(det.model, artifact_path="autoencoder_model")
         art_dir = _save_run_artefacts(
             run_id,
             scaler=scaler,
@@ -274,7 +284,7 @@ def train_autoencoder(
             with open(art_dir / "anomaly_threshold.json", "w") as f:
                 json.dump({"sigma_cutoff": sigma_cutoff}, f, indent=2)
         keras_path = art_dir / "keras_model.keras"
-        det.model.save(str(keras_path))
+        _save_keras_model(det.model, keras_path)
 
         if pr_auc is None:
             print(f"[Autoencoder] Evaluation skipped  (epochs={epochs_run})  run_id={run_id}")
@@ -334,7 +344,7 @@ def train_classifier(
         mlflow.log_metric("val_size",   len(va))
         mlflow.log_metric("test_size",  len(te))
 
-        mlflow.tensorflow.log_model(clf.model, artifact_path="classifier_model")
+        _mlflow_log_keras_model(clf.model, artifact_path="classifier_model")
         _save_run_artefacts(
             run_id,
             scaler=scaler,
@@ -344,7 +354,7 @@ def train_classifier(
             model_type="classifier",
         )
         keras_path = OUTPUT_ROOT / "classifier" / run_id / "artefacts" / "keras_model.keras"
-        clf.model.save(str(keras_path))
+        _save_keras_model(clf.model, keras_path)
 
         print(
             f"[Classifier] PR-AUC macro: {pr_auc:.4f}  F1 macro: {f1:.4f}"
@@ -547,8 +557,8 @@ def train_cnn_sae(
             json.dump(serialisable, f, indent=2)
 
         keras_path = art_dir / "keras_model.keras"
-        det.model.save(str(keras_path))
-        mlflow.tensorflow.log_model(det.model, artifact_path="cnn_sae_model")
+        _save_keras_model(det.model, keras_path)
+        _mlflow_log_keras_model(det.model, artifact_path="cnn_sae_model")
         mlflow.log_artifacts(str(art_dir), artifact_path="run_artefacts")
 
         if pr_auc is None:

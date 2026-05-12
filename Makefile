@@ -17,7 +17,7 @@ LON_COL    ?=
         predict-train predict-val predict-test predict-all predict-full \
         predict-cnn-sae-train predict-cnn-sae-val predict-cnn-sae-test \
         predict-cnn-sae-all predict-cnn-sae-full \
-        lint format \
+	lint format test-unit \
         mlflow-ui \
         clean clean-outputs clean-processed clean-pycache
 
@@ -35,37 +35,23 @@ install: venv ## Install all dependencies including dev extras
 
 # ─── Data ────────────────────────────────────────────────────────────────────
 preprocess:
-	$(PYTHON) scripts/preprocess_data.py
+	$(PYTHON) scripts/preprocess_data.py --config $(if $(CONFIG),$(CONFIG),src/geochem_detect/config/default_prep_multiclass.yml)
 
 preprocess-spatial:
-	SPATIAL=true $(PYTHON) scripts/preprocess_data.py
-
-preprocess-example: ## Preprocess default dataset (multiclass_clean.csv, non-spatial)
-	DATA_PATH=data/gvirm/multiclass_clean.csv LABEL_COL=ROCK1 \
-	  $(PYTHON) scripts/preprocess_data.py
-
-preprocess-spatial-example: ## Preprocess spatial dataset (Data1.csv)
-	DATA_PATH=data/gvirm/Data1.csv LABEL_COL=rock_name SPATIAL=true \
-	  $(PYTHON) scripts/preprocess_data.py
-
-preprocess-all-example: preprocess preprocess-spatial ## Preprocess both datasets
+	$(PYTHON) scripts/preprocess_data.py --config $(if $(CONFIG),$(CONFIG),src/geochem_detect/config/default_prep_spatial.yml)
 
 # ─── Training ────────────────────────────────────────────────────────────────
 train-iforest: ## Train Isolation Forest  (multiclass_clean.csv)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
-	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/multiclass_clean.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
-	$(PYTHON) scripts/train_isolation_forest.py $(if $(CONFIG),--config $(CONFIG),)
+	$(PYTHON) scripts/train_isolation_forest.py --config $(if $(CONFIG),$(CONFIG),src/geochem_detect/config/default_config_isolation_forest.yml)
 
-train-autoencoder: ## Train spatial autoencoder  (Data1.csv + spatial features)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
-	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/Data1.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
-	$(PYTHON) scripts/train_autoencoder.py --spatial $(if $(CONFIG),--config $(CONFIG),)
+train-autoencoder: ## Train autoencoder  (Data1.csv + spatial features)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
+	$(PYTHON) scripts/train_autoencoder.py --config $(if $(CONFIG),$(CONFIG),src/geochem_detect/config/default_config_autoencoder.yml)
 
 train-classifier: ## Train multi-class classifier  (multiclass_clean.csv)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
-	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/multiclass_clean.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
-	$(PYTHON) scripts/train_classifier.py $(if $(CONFIG),--config $(CONFIG),)
+	$(PYTHON) scripts/train_classifier.py --config $(if $(CONFIG),$(CONFIG),src/geochem_detect/config/default_config_classifier.yml)
 
 train-cnn-sae: ## Train CNN-SAE spatial anomaly detector  (Data1.csv)  [CONFIG=path/to/config.yml] [DATA_PATH=] [LAT_COL=] [LON_COL=]
-	DATA_PATH=$(if $(DATA_PATH),$(DATA_PATH),data/processed/gvirm/Data1.csv) $(if $(LAT_COL),LAT_COL=$(LAT_COL)) $(if $(LON_COL),LON_COL=$(LON_COL)) \
-	$(PYTHON) scripts/train_cnn_sae.py $(if $(CONFIG),--config $(CONFIG),)
+	$(PYTHON) scripts/train_cnn_sae.py --config $(if $(CONFIG),$(CONFIG),src/geochem_detect/config/default_config_cnn_sae.yml)
 
 train-all: train-iforest train-autoencoder train-classifier train-cnn-sae ## Train all four models sequentially
 
@@ -117,6 +103,9 @@ lint: ## Lint source and scripts with ruff
 
 format: ## Auto-format source and scripts with ruff
 	uv run ruff format src/ scripts/
+
+test-unit: install ## Run the pytest unit test suite
+	uv run pytest
 
 # ─── MLFlow ──────────────────────────────────────────────────────────────────
 mlflow-ui: ## Launch the MLFlow tracking UI  (http://localhost:$(MLFLOW_PORT))

@@ -15,9 +15,15 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
-from geochem_detect.config import data_params, load_config, model_params, training_params
+from geochem_detect.config import (
+    data_params,
+    load_config,
+    model_params,
+    training_params,
+    validate_training_config,
+)
 from geochem_detect.data.loader import DEFAULT_MULTICLASS_DATA, load_dataset_frame
-from geochem_detect.data.preprocessor import make_splits, scale_features, split_features_labels
+from geochem_detect.data.preprocessor import IdentityScaler, make_splits
 from geochem_detect.training.trainer import train_classifier
 from geochem_detect.visualization.plots import (
     plot_class_distribution,
@@ -41,6 +47,7 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config("classifier", args.config)
+    validate_training_config("classifier", cfg)
     data_cfg = data_params(cfg)
     mp = model_params(cfg)
     tp = training_params(cfg)
@@ -51,38 +58,28 @@ def main() -> None:
 
     df, data_options = load_dataset_frame(data_cfg, DEFAULT_MULTICLASS_DATA)
     feat_cols = data_options["feature_columns"]
-    X_raw, y_raw, class_names, _ = split_features_labels(
-        df,
-        feat_cols,
-        data_options["label_col"],
-        normalize_by=data_options["normalize_by"],
-    )
-
-    splits = make_splits(X_raw, y_raw)
-
-    (_, X_all_s), scaler = scale_features(
-        X_raw[splits["train_idx"]],
-        X_raw,
-        enabled=data_options["scale_features"],
-    )
-
+    X_all = df[feat_cols].to_numpy(dtype=np.float32)
     le = LabelEncoder()
-    le.classes_ = class_names
+    y_raw = le.fit_transform(df[data_options["label_col"]].values)
+    class_names = le.classes_
+
+    splits = make_splits(X_all, y_raw)
+    scaler = IdentityScaler().fit(X_all[splits["train_idx"]])
 
     dataset_info = {
         "dataset": data_options["data_path"],
         "feature_cols": feat_cols,
         "label_col": data_options["label_col"],
-        "n_samples": len(X_raw),
+        "n_samples": len(X_all),
         "longitude": data_options["longitude"],
         "latitude": data_options["latitude"],
-        "normalize_by": data_options["normalize_by"],
-        "scale_features": data_options["scale_features"],
+        "normalize_by": None,
+        "scale_features": False,
     }
 
     params = {**mp, **tp}
     clf, pr_auc, run_id = train_classifier(
-        X_all_s, y_raw, splits, le, scaler, dataset_info,
+        X_all, y_raw, splits, le, scaler, dataset_info,
         params=params,
         run_name="multiclass_clean",
     )
@@ -104,7 +101,7 @@ def main() -> None:
     }
 
     for split_name, idx in named_splits.items():
-        X_s    = X_all_s[idx]
+        X_s    = X_all[idx]
         y_s    = y_raw[idx]
         y_pred = clf.predict(X_s)
         proba  = clf.predict_proba(X_s)

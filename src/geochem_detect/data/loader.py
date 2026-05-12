@@ -8,17 +8,20 @@ import pandas as pd
 
 _RAW_DIR = Path(__file__).parents[3] / "data" / "gvirm"
 _PROCESSED_DIR = Path(__file__).parents[3] / "data" / "processed" / "gvirm"
+_RAW_ROOT = Path(__file__).parents[3] / "data"
 _PROCESSED_ROOT = Path(__file__).parents[3] / "data" / "processed"
 
 DEFAULT_MULTICLASS_DATA = Path("gvirm") / "multiclass_clean.csv"
 DEFAULT_SPATIAL_DATA = Path("gvirm") / "Data1.csv"
 DEFAULT_LABEL_COL = "label"
+DEFAULT_IDENTIFIER_COL = "identifier"
+DEFAULT_LATITUDE_COL = "latitude"
+DEFAULT_LONGITUDE_COL = "longitude"
 
 
 def resolve_data_path(default_relative: str | Path, override: str | Path | None = None) -> Path:
-    """Resolve a dataset path, preferring absolute overrides or processed-data paths."""
+    """Resolve a dataset path, preferring processed data before raw data for relative paths."""
     candidate_value = override if override is not None else os.environ.get("DATA_PATH")
-    source = "DATA_PATH" if candidate_value is not None else "default"
 
     if candidate_value is None:
         candidate = Path(default_relative)
@@ -26,30 +29,38 @@ def resolve_data_path(default_relative: str | Path, override: str | Path | None 
         candidate = Path(candidate_value)
 
     if candidate.is_absolute():
-        resolved = candidate
-    elif candidate.parts[:2] == ("data", "processed"):
-        resolved = Path(__file__).parents[3] / candidate
-    else:
-        resolved = _PROCESSED_ROOT / candidate
-
-    if resolved.exists():
-        return resolved
-
-    if source == "DATA_PATH" and candidate.is_absolute():
+        if candidate.exists():
+            return candidate
         raise FileNotFoundError(
-            f"DATA_PATH points to '{resolved}', but that file does not exist."
+            f"DATA_PATH points to '{candidate}', but that file does not exist."
         )
 
-    expected_root = _PROCESSED_ROOT
+    search_paths: list[Path]
+    if candidate.parts[:2] == ("data", "processed") or (
+        candidate.parts and candidate.parts[0] == "processed"
+    ):
+        search_paths = [Path(__file__).parents[3] / candidate]
+    elif candidate.parts and candidate.parts[0] == "data":
+        project_candidate = Path(__file__).parents[3] / candidate
+        search_paths = [project_candidate]
+    else:
+        search_paths = [_PROCESSED_ROOT / candidate, _RAW_ROOT / candidate]
+
+    for resolved in search_paths:
+        if resolved.exists():
+            return resolved
+
     raise FileNotFoundError(
-        f"Could not find dataset '{candidate}'. Expected a file under {expected_root} "
-        f"(resolved to '{resolved}'). Set DATA_PATH to an absolute path or run `make preprocess` first."
+        f"Could not find dataset '{candidate}'. "
+        f"Checked: {', '.join(str(path) for path in search_paths)}. "
+        "Set DATA_PATH to an absolute path or run `make preprocess` first."
     )
 
 
 def resolve_data_options(
     data_cfg: dict | None,
     default_relative: str | Path,
+    label_col: str | None = None,
 ) -> dict:
     """Resolve data loading options from config plus environment overrides."""
     data_cfg = dict(data_cfg or {})
@@ -62,7 +73,8 @@ def resolve_data_options(
 
     return {
         "data_path": str(resolve_data_path(default_relative, override_path)),
-        "label_col": DEFAULT_LABEL_COL,
+        "label_col": label_col or data_cfg.get("label") or DEFAULT_LABEL_COL,
+        "identifier_col": DEFAULT_IDENTIFIER_COL,
         "feature_columns": feature_columns,
         "longitude": longitude,
         "latitude": latitude,
@@ -73,7 +85,7 @@ def resolve_data_options(
 
 def resolve_feature_columns(df: pd.DataFrame, data_options: dict) -> list[str]:
     """Resolve feature columns from config or by auto-discovery."""
-    reserved = {data_options["label_col"]}
+    reserved = {data_options["label_col"], data_options.get("identifier_col")}
     for column_name in (
         data_options.get("longitude"),
         data_options.get("latitude"),
@@ -100,11 +112,17 @@ def load_dataset_frame(
     data_cfg: dict | None,
     default_relative: str | Path,
     require_label: bool = True,
+    label_col: str | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Load a labeled dataset and resolve feature/coordinate options."""
-    data_options = resolve_data_options(data_cfg, default_relative)
+    data_options = resolve_data_options(data_cfg, default_relative, label_col=label_col)
     df = pd.read_csv(data_options["data_path"], encoding="utf-8-sig")
     df.columns = df.columns.str.strip()
+
+    if data_options["latitude"] is None and DEFAULT_LATITUDE_COL in df.columns:
+        data_options["latitude"] = DEFAULT_LATITUDE_COL
+    if data_options["longitude"] is None and DEFAULT_LONGITUDE_COL in df.columns:
+        data_options["longitude"] = DEFAULT_LONGITUDE_COL
 
     label_col = data_options["label_col"]
     if require_label:
@@ -124,19 +142,30 @@ def load_spatial_frame(
     data_cfg: dict | None,
     default_relative: str | Path,
     require_label: bool = True,
+    label_col: str | None = None,
 ):
     """Load a labeled spatial dataset as a GeoDataFrame using configured coord columns."""
     import geopandas as gpd
 
-    df, data_options = load_dataset_frame(data_cfg, default_relative, require_label=require_label)
+    df, data_options = load_dataset_frame(
+        data_cfg,
+        default_relative,
+        require_label=require_label,
+        label_col=label_col,
+    )
     longitude = data_options["longitude"]
     latitude = data_options["latitude"]
     if longitude is None or latitude is None:
         raise ValueError(
             "Spatial data requires configured longitude and latitude columns. "
-            "Set data.longitude and data.latitude in the config or override them via LON_COL/LAT_COL."
+            "Set data.longitude and data.latitude in the config or override "
+            "them via LON_COL/LAT_COL."
         )
-    missing = [column_name for column_name in (longitude, latitude) if column_name not in df.columns]
+    missing = [
+        column_name
+        for column_name in (longitude, latitude)
+        if column_name not in df.columns
+    ]
     if missing:
         raise ValueError(f"Spatial columns not found in data: {missing}")
 

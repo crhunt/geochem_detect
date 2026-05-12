@@ -118,7 +118,7 @@ class GeochemClassifier:
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Return class probabilities (n_samples, n_classes)."""
-        return self.model.predict(X, verbose=0)
+        return self.model(X, training=False).numpy()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Return predicted class indices."""

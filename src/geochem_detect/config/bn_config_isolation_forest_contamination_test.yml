@@ -1,27 +1,23 @@
 data:
-  data_path: gvirm/multiclass_clean.csv
+  data_path: babel-nebo/babel-nebo-lagsample-subset-labels.csv
   feature_columns:
-    - SIO2(WT%)
-    - TIO2(WT%)
-    - AL2O3(WT%)
-    - FEOT(WT%)
-    - CAO(WT%)
-    - MGO(WT%)
-    - MNO(WT%)
-    - K2O(WT%)
-    - NA2O(WT%)
-    - P2O5(WT%)
+    - Cu_ppm
+    - Ni_ppm
+    - Fe_pct
+    - Au_ppb
+    - Pt_ppb
+    - Pd_ppb
+  longitude: NORTHING
+  latitude: EASTING
   label: label
 
 # Default hyperparameters for IsolationForestDetector
 # These values are also the class defaults in models/isolation_forest.py
 
 model:
-  n_estimators: 200
+  n_estimators: 1000
   # Expected fraction of outliers; used by sklearn to set the decision threshold.
-  # Matches the actual anomaly fraction at contamination_threshold=0.01:
-  # 76 rare classes (< 38 members each) -> 378 / 3886 points = 9.7%.
-  contamination: 0.097
+  contamination: 0.018
   max_features: 1.0
   random_state: 42
   n_jobs: -1
@@ -31,8 +27,9 @@ model:
 # At 0.01: threshold = 38 members -> 76 rare classes -> 9.7% of points anomalous.
 evaluation:
   label: label
-  contamination_threshold: 0.05
+  #contamination_threshold: 0.05
   # Alternatively, specify exact label values directly:
-  # anomaly_labels: ["label_a", "label_b"]
+  anomaly_labels: ['Pt_rich', 'Pd_rich', 'Au_rich', 'Fe_Ni_rich',
+       'babel_nebo', 'Cu_rich']
   # Isolation Forest labels anomalies when decision_function < cutoff.
   cutoff: 0.0

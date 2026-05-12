@@ -1,0 +1,46 @@
+data:
+  data_path: babel-nebo/babel-nebo-lagsample-subset.csv
+  processed_data_path: babel-nebo/babel-nebo-lagsample-subset.csv
+  feature_columns:
+    - Mo_ppm
+    - Cu_ppm
+    - Pb_ppm
+    - Zn_ppm
+    - Ag_ppm
+    - Ni_ppm
+    - Co_ppm
+    - Mn_ppm
+    - Fe_pct
+    - As_ppm
+    - U_ppm
+    - Au_ppm
+    - Sr_ppm
+    - Cd_ppm
+    - Sb_ppm
+    - Bi_ppm
+    - V_ppm
+    - Ca_pct
+    - P_pct
+    - La_ppm
+    - Cr_ppm
+    - Mg_pct
+    - Ba_ppm
+    - Al_pct
+    - Na_pct
+    - K_pct
+    - W_ppm
+    - Zr_ppm
+    - Sn_ppm
+    - Y_ppm
+    - Nb_ppm
+    - Be_ppm
+    - Sc_ppm
+    - Au_ppb
+    - Pt_ppb
+    - Pd_ppb
+  scale_features: false
+  normalize_by: Ti_pct
+  latitude: EASTING
+  longitude: NORTHING
+  identifier: SAMP_NO
+  # label: SAMP_NO

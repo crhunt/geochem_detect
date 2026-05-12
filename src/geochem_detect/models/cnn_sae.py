@@ -268,6 +268,9 @@ class CnnSaeDetector:
     # Inference
     # ------------------------------------------------------------------
 
+    def _predict_reconstruction(self, X: np.ndarray) -> np.ndarray:
+        return self.model(X, training=False).numpy()
+
     def reconstruction_errors(self, X: np.ndarray) -> np.ndarray:
         """Masked MSE reconstruction error per sample.
 
@@ -276,7 +279,7 @@ class CnnSaeDetector:
         """
         X_feat = X[:, :, :, : self.n_features]
         occ = X[:, :, :, self.n_features]  # (n, H, W)
-        preds = self.model.predict(X, verbose=0)  # (n, H, W, C)
+        preds = self._predict_reconstruction(X)  # (n, H, W, C)
         per_cell = np.mean((X_feat - preds) ** 2, axis=-1)  # (n, H, W)
         masked = per_cell * occ
         n_occ = np.maximum(occ.sum(axis=(1, 2)), 1.0)

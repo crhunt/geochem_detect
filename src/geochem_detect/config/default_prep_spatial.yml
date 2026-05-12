@@ -1,0 +1,19 @@
+data:
+  data_path: gvirm/Data1.csv
+  processed_data_path: gvirm/Data1.csv
+  feature_columns:
+    - SiO2n
+    - TiO2n
+    - Al2O3n
+    - FeO*n
+    - MnOn
+    - MgOn
+    - CaOn
+    - Na2On
+    - K2On
+    - P2O5n
+  longitude: long
+  latitude: lat
+  scale_features: true
+  # normalize_by: some_reference_column
+  # identifier: some_source_id_column

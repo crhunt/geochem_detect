@@ -1,48 +1,69 @@
 # geochem_detect
 
-Scalable Python package for **anomaly detection** and **multi-class classification** of geochemical (major-oxide) data.
+Scalable Python package for **anomaly detection** and **multi-class classification** of geochemical data.
 
 ## Methods
 | Task | Method | Library |
 |------|--------|---------|
 | Anomaly detection | Isolation Forest | scikit-learn |
-| Anomaly detection | Spatial Autoencoder | Keras / TensorFlow |
+| Anomaly detection | Autoencoder | Keras / TensorFlow |
 | Anomaly detection | CNN + Sparse Autoencoder (CNN-SAE) | Keras / TensorFlow |
 | Classification | Imbalance-aware MLP | Keras / TensorFlow |
 
-Experiments are tracked with **MLFlow**. Spatial data is handled via **GeoPandas**.
-
----
+Experiments are tracked with **MLflow**. Spatial data is handled with **GeoPandas**.
 
 ## Getting started
 
 ### 1. Create the environment
 
 ```bash
-make venv       # or: uv sync
+make venv      # base environment
+make install   # base + dev dependencies
 ```
+
+Use `make install` if you plan to run tests or notebooks.
 
 ### 2. Preprocess data
 
-Raw data lives under `data/<dataset name>`. Processed output mirrors the source layout under `data/processed/<dataset name>/`.
-The preprocessing script also supports unlabeled CSVs and remaps negative feature values with `x -> -0.5*x` before writing output.
+Raw data lives under `data/<dataset>/`. Processed output mirrors that layout under `data/processed/<dataset>/`.
+
+The preprocessing script can handle labeled or unlabeled CSVs. Negative feature values are remapped with `x -> -0.5x` before writing output.
+
+Preprocessing is driven by YAML files under `src/geochem_detect/config/`, for example:
+
+- `default_prep_multiclass.yml`
+- `default_prep_spatial.yml`
+- `bn_prep.yml`
 
 ```bash
 make preprocess          # multiclass_clean.csv  (non-spatial)
 make preprocess-spatial  # Data1.csv             (lat/lon retained)
-make preprocess-all      # both datasets
+
+# Use a custom preprocessing config
+make preprocess CONFIG=src/geochem_detect/config/bn_prep.yml
 ```
+
+The preprocess config controls the source path, processed output path, feature columns, optional normalization column, coordinate columns, identifier column, and optional label source column.
+
+Processed files keep the configured coordinate column names. Training and prediction use config values or saved run metadata to resolve those columns.
 
 ### 3. Train models
 
-Each training script reads all hyperparameters from a YAML config file.  When
-`--config` is omitted the bundled default config is used automatically.
+Each training script reads its settings from a YAML config file. If `--config` is omitted, the bundled default is used.
+
+Training configs should include:
+
+- `data.data_path`
+- `data.feature_columns`
+- any schema columns needed at training or evaluation time, such as `data.label`, `data.latitude`, and `data.longitude`
+
+The training entry points validate required config fields up front and fail early with a clear error if a required field is missing.
 
 ```bash
 # Isolation Forest — anomaly detection on multiclass_clean.csv
 make train-iforest
 
-# Spatial autoencoder — anomaly detection on Data1.csv (with lat/lon)
+# Autoencoder — anomaly detection on tabular data, optionally with spatial inputs
 make train-autoencoder
 
 # CNN + Sparse Autoencoder — spatial anomaly detection on Data1.csv
@@ -62,36 +83,39 @@ make train-classifier CONFIG=my_configs/deep_net.yml
 make train-iforest    CONFIG=my_configs/high_contamination.yml
 ```
 
-Or call scripts directly:
+If anomaly evaluation uses class labels, `evaluation.label` can override `data.label`. In the common case both should remain `label` for processed datasets.
+
+You can also call the scripts directly:
 
 ```bash
 uv run python scripts/train_isolation_forest.py --config my_configs/iforest.yml
-uv run python scripts/train_autoencoder.py --spatial --config my_configs/ae.yml
+uv run python scripts/train_autoencoder.py --config my_configs/ae.yml
 uv run python scripts/train_classifier.py --config my_configs/clf.yml
 ```
 
 ### 4. Run predictions
 
-After training, use the printed `run_id` (or find it in the MLFlow UI) to run
-a trained model against any data split or a new dataset.
+After training, use the printed `run_id` or find it in the MLflow UI.
 
 ```bash
-# Against individual splits used during training
+# Run a saved model on individual splits
 make predict-train RUN_ID=<run_id> MODEL_TYPE=classifier
 make predict-val   RUN_ID=<run_id> MODEL_TYPE=classifier
 make predict-test  RUN_ID=<run_id> MODEL_TYPE=classifier
 
-# Against all three splits at once
+# Run all saved splits
 make predict-all   RUN_ID=<run_id> MODEL_TYPE=classifier
 
-# Against a full dataset (original training data or any new file)
+# Run on a full dataset
 make predict-full  RUN_ID=<run_id> MODEL_TYPE=autoencoder
 make predict-full  RUN_ID=<run_id> MODEL_TYPE=autoencoder DATA_PATH=data/gvirm/Data1.csv
 ```
 
-Predictions are written to `outputs/<run_id>/predictions_<split>.csv`.
+Predictions are written to:
 
-For the CNN-SAE model use the dedicated script (spatial windows, not tabular rows):
+- `outputs/<model_type>/<run_id>/predictions/predictions_<split>.csv`
+
+CNN-SAE uses a separate prediction flow because it works on sampled spatial windows rather than tabular rows:
 
 ```bash
 make predict-cnn-sae-train RUN_ID=<run_id>
@@ -102,7 +126,9 @@ make predict-cnn-sae-full  RUN_ID=<run_id>           # fresh windows from source
 make predict-cnn-sae-full  RUN_ID=<run_id> DATA_PATH=data/gvirm/Data1.csv
 ```
 
-CNN-SAE predictions are written to `outputs/<run_id>/predictions/predictions_cnn_sae_<split>.csv`.
+CNN-SAE predictions are written to:
+
+- `outputs/cnn_sae/<run_id>/predictions/predictions_cnn_sae_<split>.csv`
 
 ### 5. View results in MLFlow
 
@@ -110,6 +136,14 @@ CNN-SAE predictions are written to `outputs/<run_id>/predictions/predictions_cnn
 make mlflow-ui
 # open http://localhost:5000
 ```
+
+### 6. Run unit tests
+
+```bash
+make test-unit
+```
+
+This runs the pytest unit suite and prints terminal coverage output.
 
 ---
 
@@ -120,13 +154,18 @@ Each model has a bundled default YAML config under `src/geochem_detect/config/`:
 | Model | Default config file |
 |-------|---------------------|
 | Isolation Forest | `default_config_isolation_forest.yml` |
-| Spatial Autoencoder | `default_config_autoencoder.yml` |
+| Autoencoder | `default_config_autoencoder.yml` |
 | CNN-SAE | `default_config_cnn_sae.yml` |
 | MLP Classifier | `default_config_classifier.yml` |
 
 ### Isolation Forest defaults
 
 ```yaml
+data:
+  data_path: gvirm/multiclass_clean.csv
+  feature_columns: [SIO2(WT%), TIO2(WT%), AL2O3(WT%), FEOT(WT%), CAO(WT%), MGO(WT%), MNO(WT%), K2O(WT%), NA2O(WT%), P2O5(WT%)]
+  label: label
+
 model:
   n_estimators: 200
   contamination: 0.05
@@ -134,13 +173,21 @@ model:
   random_state: 42
   n_jobs: -1
 
-training:
+evaluation:
+  label: label
   contamination_threshold: 0.05  # fraction of full dataset that defines "rare" classes
 ```
 
 ### Autoencoder defaults
 
 ```yaml
+data:
+  data_path: gvirm/Data1.csv
+  feature_columns: [SiO2n, TiO2n, Al2O3n, FeO*n, MnOn, MgOn, CaOn, Na2On, K2On, P2O5n]
+  longitude: long
+  latitude: lat
+  label: label
+
 model:
   encoding_dim: 4
   hidden_dims: [32, 16]
@@ -151,17 +198,27 @@ model:
   patience: 10
 
 training:
-  spatial: false              # set true to include scaled lat/lon as auxiliary inputs
-  contamination_threshold: 0.05
+  spatial: false
+
+evaluation:
+  label: label
+  contamination_threshold: 0.01
 ```
+
+Set `training.spatial: true` to include the configured coordinate columns as auxiliary inputs.
 
 ### CNN-SAE defaults
 
-The CNN-SAE tiles the survey area into sparse 2-D grids and learns to reconstruct
-typical geochemical assemblages; windows with high reconstruction error are
-flagged as anomalous.
+CNN-SAE tiles the survey area into sparse 2-D grids and learns to reconstruct typical geochemical patterns. Windows with high reconstruction error are flagged as anomalous.
 
 ```yaml
+data:
+  data_path: gvirm/Data1.csv
+  feature_columns: [SiO2n, TiO2n, Al2O3n, FeO*n, MnOn, MgOn, CaOn, Na2On, K2On, P2O5n]
+  longitude: long
+  latitude: lat
+  label: label
+
 sampling:
   window_deg: 0.5    # 0.5° × 0.5° bounding box (~55 km × 39 km at 45 °N)
   grid_size: 16      # 16 × 16 cells; each cell ≈ 3.5 km × 3.5 km
@@ -180,18 +237,24 @@ model:
   patience: 10
 
 training:
-  contamination_threshold: 0.05
+  val_size: 0.15
+  test_size: 0.15
+
+evaluation:
+  label: label
+  contamination_threshold: 0.001
   anomaly_sigma_cutoff: 2.0
 ```
 
 **Why these spatial defaults?**
-Data1.csv covers 6.7 ° lat × 2.7 ° lon at ~231 pts/sq-deg.
-A 1.0 ° window packs nearly every cell of a 16 × 16 grid (≈3.8 pts/cell), removing the sparsity signal the model relies on.
-A 0.5 ° window yields a median of ~238 pts in 256 cells (≈60 % occupancy) — sparse enough for the anomaly signal to show while still giving the CNN meaningful spatial context.
+Data1.csv covers 6.7 ° lat × 2.7 ° lon at about 231 points per square degree. A 1.0 ° window packs most cells in a 16 × 16 grid and weakens the sparsity signal. A 0.5 ° window keeps enough empty cells for the anomaly signal to remain useful while still giving the CNN spatial context.
 
 ### Classifier defaults
 
 ```yaml
+data:
+  data_path: gvirm/multiclass_clean.csv
+
 model:
   hidden_dims: [64, 32]
   dropout_rate: 0.3
@@ -211,57 +274,57 @@ values fall back to the defaults shown above.
 ```
 src/geochem_detect/
 ├── config/
-│   ├── __init__.py                          # load_config(), model_params(), training_params(), sampling_params()
+│   ├── __init__.py
 │   ├── default_config_isolation_forest.yml
 │   ├── default_config_autoencoder.yml
 │   ├── default_config_cnn_sae.yml
 │   └── default_config_classifier.yml
 ├── data/
-│   ├── loader.py          # CSV → DataFrame / GeoDataFrame
-│   ├── preprocessor.py    # scaling, encoding, 70/15/15 splits with index tracking
-│   └── spatial_sampler.py # windows → sparse (H, W, C) grids for the CNN-SAE
+│   ├── loader.py
+│   ├── preprocessor.py
+│   └── spatial_sampler.py
 ├── models/
 │   ├── isolation_forest.py
 │   ├── autoencoder.py
-│   ├── cnn_sae.py          # CnnSaeDetector + build_cnn_sae()
+│   ├── cnn_sae.py
 │   └── classifier.py
 ├── training/
-│   └── trainer.py       # MLFlow wrappers; saves artefacts per run
+│   └── trainer.py
 └── visualization/
-    └── plots.py         # PR curves, confusion matrix, spatial map
+  └── plots.py
 
 scripts/
-├── preprocess_data.py    # env-var-driven preprocessing (spatial + non-spatial)
+├── preprocess_data.py
 ├── train_isolation_forest.py
 ├── train_autoencoder.py
-├── train_cnn_sae.py      # CNN-SAE training + plotting
+├── train_cnn_sae.py
 ├── train_classifier.py
-├── predict.py            # run any trained model against any split or dataset
-└── predict_cnn_sae.py   # CNN-SAE predictions (spatial windows)
+├── predict.py
+└── predict_cnn_sae.py
 ```
 
 ### Run artefacts
 
-Each training run saves the following under `outputs/<run_id>/artefacts/`:
+Each training run saves artefacts under `outputs/<model_type>/<run_id>/artefacts/`.
 
 | File | Contents |
 |------|----------|
-| `scaler.pkl` | Fitted `RobustScaler` |
+| `scaler.pkl` | Fitted scaler |
 | `label_encoder.pkl` | Fitted `LabelEncoder` |
 | `splits.npz` | `train_idx`, `val_idx`, `test_idx` |
 | `dataset_info.json` | Dataset path, feature columns, label column |
-| `model.pkl` or `keras_model.keras` | Serialised model |
+| `model.pkl` or `keras_model.keras` | Saved model |
+| `anomaly_threshold.json` | Saved anomaly threshold for anomaly detectors |
 
 CNN-SAE runs additionally save:
 
 | File | Contents |
 |------|----------|
-| `anomaly_threshold.json` | Score threshold used to flag anomalies |
 | `sampling_params.json` | `window_deg`, `grid_size`, `n_samples`, etc. |
 | `window_splits.npz` | Window-level `train_idx`, `val_idx`, `test_idx` |
 | `window_metadata.json` | Centre lat/lon and point indices for every window |
 
-Plots are written to `outputs/<run_id>/`.
+Plots and prediction outputs are written under `outputs/<model_type>/<run_id>/`.
 
 ---
 
@@ -272,16 +335,19 @@ Run `make help` to list all targets.  Key targets:
 | Target | Description |
 |--------|-------------|
 | `venv` | Create / sync the virtual environment |
-| `preprocess[-spatial\|-all]` | Preprocess datasets |
+| `install` | Install runtime and dev dependencies |
+| `preprocess` | Preprocess the default non-spatial dataset |
+| `preprocess-spatial` | Preprocess the default spatial dataset |
 | `train-iforest` | Train Isolation Forest |
-| `train-autoencoder` | Train spatial autoencoder |
+| `train-autoencoder` | Train autoencoder |
 | `train-cnn-sae` | Train CNN-SAE spatial anomaly detector |
 | `train-classifier` | Train MLP classifier |
 | `train-all` | Train all four models |
 | `predict-[train\|val\|test\|all\|full]` | Run a trained model (requires `RUN_ID=` `MODEL_TYPE=`) |
 | `predict-cnn-sae-[train\|val\|test\|all\|full]` | Run CNN-SAE predictions (requires `RUN_ID=`) |
 | `mlflow-ui` | Launch MLFlow UI at `http://localhost:5000` |
-| `lint` / `format` | ruff check / format |
+| `lint` / `format` | Run Ruff checks or formatting |
+| `test-unit` | Run unit tests with coverage output |
 | `clean` | Remove outputs and caches |
 | `clean-processed` | Remove processed data |
 

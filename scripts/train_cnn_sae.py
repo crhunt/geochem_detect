@@ -22,9 +22,17 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
-from geochem_detect.config import data_params, evaluation_params, load_config, model_params, sampling_params, training_params
+from geochem_detect.config import (
+    data_params,
+    evaluation_params,
+    load_config,
+    model_params,
+    sampling_params,
+    training_params,
+    validate_training_config,
+)
 from geochem_detect.data.loader import DEFAULT_SPATIAL_DATA, load_spatial_frame
-from geochem_detect.data.preprocessor import prepare_labeled_frame, scale_features
+from geochem_detect.data.preprocessor import IdentityScaler
 from geochem_detect.training.trainer import resolve_anomaly_ground_truth, train_cnn_sae
 from geochem_detect.visualization.plots import (
     plot_anomaly_scores_histogram,
@@ -33,6 +41,20 @@ from geochem_detect.visualization.plots import (
 )
 
 OUTPUT_ROOT = Path(__file__).parents[1] / "outputs"
+
+
+def _evaluation_requires_labels(evaluation: dict | None) -> bool:
+    evaluation = dict(evaluation or {})
+    return any(
+        evaluation.get(key) is not None
+        for key in ("anomaly_labels", "contamination_threshold")
+    )
+
+
+def _evaluation_label_col(evaluation: dict | None, data_cfg: dict | None) -> str:
+    evaluation = dict(evaluation or {})
+    data_cfg = dict(data_cfg or {})
+    return str(evaluation.get("label") or data_cfg.get("label") or "label")
 
 
 def main() -> None:
@@ -66,39 +88,43 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config("cnn_sae", args.config)
+    validate_training_config("cnn_sae", cfg)
     data_cfg = data_params(cfg)
     mp = model_params(cfg)
     tp = training_params(cfg)
     ep = evaluation_params(cfg)
     sp = sampling_params(cfg)
+    labels_required = _evaluation_requires_labels(ep)
+    label_col = _evaluation_label_col(ep, data_cfg)
 
     # ── Load and clean data ──────────────────────────────────────────────────
     if args.data_path is not None:
         data_cfg = dict(data_cfg)
         data_cfg["data_path"] = args.data_path
-    gdf, data_options = load_spatial_frame(data_cfg, DEFAULT_SPATIAL_DATA)
-    gdf_clean, feat_cols = prepare_labeled_frame(
-        gdf,
-        data_options["feature_columns"],
-        data_options["label_col"],
-        normalize_by=data_options["normalize_by"],
+    gdf, data_options = load_spatial_frame(
+        data_cfg,
+        DEFAULT_SPATIAL_DATA,
+        require_label=labels_required,
+        label_col=label_col,
     )
+    feat_cols = data_options["feature_columns"]
 
-    X_raw = gdf_clean[feat_cols].to_numpy(dtype=np.float32)
-    le = LabelEncoder()
-    y_raw = le.fit_transform(gdf_clean[data_options["label_col"]].values)
+    X_raw = gdf[feat_cols].to_numpy(dtype=np.float32)
+    label_available = data_options["label_col"] in gdf.columns
+    if labels_required and not label_available:
+        raise ValueError(
+            f"Evaluation requires label column '{data_options['label_col']}' in the processed dataset. "
+            "Re-run preprocessing with a label source column or remove evaluation settings."
+        )
 
-    # Scale features — fit on all data (consistent with spatial windowing where
-    # we cannot do a geographic train split before sampling)
-    (X_scaled,), scaler = scale_features(
-        X_raw,
-        enabled=data_options["scale_features"],
-    )
-
-    # Write scaled features back into the GeoDataFrame columns so that
-    # SpatialSampler reads the already-normalised values
-    gdf_clean = gdf_clean.copy()
-    gdf_clean[feat_cols] = X_scaled
+    if label_available:
+        le = LabelEncoder()
+        y_raw = le.fit_transform(gdf[data_options["label_col"]].values)
+    else:
+        le = LabelEncoder()
+        y_raw = np.zeros(len(gdf), dtype=np.int32)
+        le.fit(np.array(["data"], dtype=object))
+    scaler = IdentityScaler().fit(X_raw)
 
     dataset_info = {
         "dataset": data_options["data_path"],
@@ -107,13 +133,13 @@ def main() -> None:
         "n_samples": len(X_raw),
         "longitude": data_options["longitude"],
         "latitude": data_options["latitude"],
-        "normalize_by": data_options["normalize_by"],
-        "scale_features": data_options["scale_features"],
+        "normalize_by": None,
+        "scale_features": False,
     }
 
     params = {**mp, **tp}
     det, pr_auc, run_id = train_cnn_sae(
-        gdf_clean,
+        gdf,
         y_raw,
         le,
         scaler,
@@ -153,7 +179,7 @@ def main() -> None:
     from geochem_detect.data.spatial_sampler import SpatialSampler
 
     sampler = SpatialSampler(
-        gdf=gdf_clean,
+        gdf=gdf,
         feature_cols=feat_cols,
         anomaly_labels=raw_anom_labels,
         **sp,
@@ -241,7 +267,7 @@ def main() -> None:
             title=f"Spatial Anomaly Map {title_sfx}",
             save_path=out_dir / f"spatial_anomaly_map_cnn_sae_{split_name}.png",
             window_deg=sp["window_deg"],
-            raw_gdf=gdf_clean.iloc[split_pt_idx],
+            raw_gdf=gdf.iloc[split_pt_idx],
             raw_y=raw_anom_labels[split_pt_idx] if y_anom_all is not None else None,
         )
 

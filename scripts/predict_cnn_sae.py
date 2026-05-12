@@ -73,11 +73,10 @@ def _load_keras_model(run_id: str):
 
 
 def _load_source_data(info: dict, data_path: str | None):
-    """Load and clean the source GeoDataFrame, returning scaled features."""
+    """Load the processed source GeoDataFrame and rebuild only model inputs."""
     from sklearn.preprocessing import LabelEncoder
 
     from geochem_detect.data.loader import load_spatial_frame
-    from geochem_detect.data.preprocessor import prepare_labeled_frame
 
     data_cfg = {
         "data_path": data_path or info["dataset"],
@@ -87,13 +86,21 @@ def _load_source_data(info: dict, data_path: str | None):
         "normalize_by": info.get("normalize_by"),
         "scale_features": info.get("scale_features", True),
     }
-    gdf, data_options = load_spatial_frame(data_cfg, info["dataset"])
-    gdf_clean, feat_cols = prepare_labeled_frame(
-        gdf,
-        data_options["feature_columns"],
-        data_options["label_col"],
-        normalize_by=data_options["normalize_by"],
+    gdf, data_options = load_spatial_frame(
+        data_cfg,
+        info["dataset"],
+        label_col=info.get("label_col", "label"),
     )
+    feat_cols = data_options["feature_columns"]
+    missing = [column_name for column_name in feat_cols if column_name not in gdf.columns]
+    if missing:
+        raise ValueError(f"Configured feature columns not found in prediction data: {missing}")
+    if gdf[feat_cols].isna().any().any():
+        raise ValueError(
+            "Prediction data contains missing feature values. Run preprocessing "
+            "first instead of relying on prediction-time cleaning."
+        )
+    gdf_clean = gdf.reset_index(drop=True)
     X_raw = gdf_clean[feat_cols].to_numpy(dtype=np.float32)
     le = LabelEncoder()
     y_raw = le.fit_transform(gdf_clean[data_options["label_col"]].values)

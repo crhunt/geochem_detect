@@ -1,0 +1,237 @@
+Model: GPT-5.4
+
+Prompt 1
+
+Let's expand the preprocess_data.py utilities to 1) fix *negative* values in feature columns by the transform x --> -0.5*x and 2) support the label column being optional.
+
+Prompt 2
+
+Update the train-* make targets and the scripts they call (geochem_detect/scripts/train_*.py) support a data path env variable DATA_PATH. The defaults in the makefile should match the dataset that is currently hard-coded.
+
+The train scripts should use a common utility to check the data path. If the path DATA_PATH is provided and is absolute, the script should identify that and support it, else it should default to expecting the path to be under geochem_detect/data/processed) and check that it exists and fail gracefully.
+
+Prompt 3
+
+We define y_anom using a contamination threshhold for anomaly detection evaluation. We want to add an additional method for defining ground truth anomalous events. Rather than determining rare classes from the count of the class, we should be able to directly supply values for the label column in the config yaml file via training.anomaly_labels (ie, we define the variable `rare` directly). The presence of either training.contamination_threshold or training.anomaly_labels determines which to use for evaluation in the training scripts. Also, since y_anom is used in evaluation and not training, change the config `training.contamination_threshold` and `training.anomaly_sigma_cutoff` to `evaluation.contamination_threshold` and `evaluation.anomaly_sigma_cutoff` (and `evaluation.anomaly_labels). Additionally, make these evaluation parameters optional. We do not perform the evaluation if neither anomaly_labels or contamination_threshold is supplied.
+
+Prompt 4
+
+Make sure we always plot figures that do not depend on y_anom. The last revision changed this. I fixed it by hand for train_isolation_forest.
+
+Prompt 5
+
+Let's fix 2 inconsistencies for anomaly detection evaluation.
+
+1. For the isolation forest model, we want to follow standard practice and return decision_function output directly as the anomaly score. After training, instead of plotting a histogram of the anomaly score as it's currently calculated, plot a histogram of the decision_function. Note in the plot the cutoff (default zero) for labeling anomalous data. Make the cutoff set-able in the isolation forest config under `evaluation.cutoff`.
+
+2. For the cnn_sae model, we want to follow the pattern in the autoencoder model and determine the threshold for labeling anomalous data using the validation split.
+
+Prompt 6
+
+We want to clean up data preprocessing.
+1. Support running all models with spatial data. We will do this by adding support for the following config changes: a top level "data" option containing the following optional values `data_path` (file path, can be overridden with DATA_PATH), `feature_columns` (list of column names), `longitude` (column name, can be overridden with LON_COL), `latitude` (column name, can be overridden iwth LAT_COL).
+2. Support in the Makefile for all optional overrides in the train targets
+3. Models that do not use spatial data ignore the spatial (latitude longitude) columns
+4. The data preprocessing script ignores data that isn't labeled as in point 1 (unless feature columns are auto-discovered if `feature_columns` not specified)
+5. The data loader script should be completely generic wrt data source. Column names should be extracted from the loaded data (no hardcoded FEATURE_COLS_*).
+6. Feature scaling: make running `scale_features` configurable in the config yaml. Add an option of specifying a column to normalize other features by.
+
+Prompt 7
+
+Check that in cases where no spatial coordinates are in the source data, we do not specify latitude or longitude in the config, and we gracefully preprocess the data.
+
+Prompt 8
+
+For all anomaly detection models, whether they use the spatial data or not, if there is spatial coordinates in the source data, create a spatial anomaly map after training.
+
+Prompt 9
+
+Note that the autoencoder model should also support data that does not contain spatial coordinates (just as isolation forest does). Ensure that each case is handled cleanly: including/not including the spatial features in training, plotting/skipping spatial anomaly plot, config supports both.
+
+Prompt 10
+
+For preprocess_data.py, add support for supplying a config file and setting env variables based on the config file `data` parameters (as fallback).
+
+Prompt 11
+
+Let the config data.data_path support just <data source>/<filename> format. If being used by the preprocessor, assume the absolute path follows the convention `./data/<data source>/<filename>` (continue to support absolute paths as well). If being used by training, first check if `./data/processed/<data source>/<filename> exists and use that before checking `./data/<data source>/<filename>` (continue to support absolute paths as well).
+
+Prompt 12
+
+Running the train scripts should not involve pre-processing the data (ie cleaning/scaling/normalizing the data with data.preprocessor). We expect the user to preprocess the data before training. Check all the train scripts and remove any data pre-processing. The only data preparation should be to load the dataset, create splits, and reshape as needed to only train on the feature columns.
+
+Prompt 13
+
+We have a disconnect in expected and actual behavior when running make train_iforest with config bn_config_isolation_forest.yml. I expect not to have any evaluation anomaly labels because I do not specify either contamination_threshold or anomaly_labels in the config. Yet labels are auto-selected. Identify the source of the disconnect and correct it. Be sure to correct similar issues for the other models as well.
+
+Prompt 14
+
+When no ground truth anomaly data is provided, the spatial anomaly map plot should still plot all relevant data (data in the split train/val/test/all) as normal data. The only difference should be the label (instead of "Normal (ground truth)" just "Data").
+
+Prompt 15
+
+Let's add support in the data preprocessor for providing an identifier column from the input data that is preserved in the output without any processing. (This can be used for joining in later analysis.) If an identifier column is not provided, use the index in the original dataset.
+
+Let's also add an explicit entry to the config, data.processed_data_path. If this is provided, then the name is used when running the preprocess script as the output name of the data. It is also used as the data name to load when running train_* scripts. If not provided, behave the same as currently.
+
+Prompt 16
+
+We have a disconnect in expected and actual behavior when running make train_iforest with config bn_config_isolation_forest.yml. I expect to support the case when no 'label' column is provided but I get a value error. The presence of this column should only impact evaluation and should not be a problem if no evaluation is set.
+
+Prompt 17
+
+Let's enhance the spatial anomaly map by scaling the Anomaly detected (model) datapoint sizes by the anomaly score value. In order to work across all models, be sure to normalize the scores if they are from the isolation forest model. Ensure it is possible to see through the datapoints in order to read the ground truth data as well.
+
+Prompt 18
+
+Remove all fill from the Anomaly detected (model) datapoints in the spatial anomaly map. Make sure the scaling of the data point size only takes into account points above the threshold to maximize the visible difference in the scores.
+
+Prompt 19
+
+We have a probable data loading bug. The same data config works successfully for training the iforest model, but fails when training the autoencoder. The error is,
+```
+Traceback (most recent call last):
+  File "/home/cassi/projects/geochem_detect/scripts/train_autoencoder.py", line 228, in <module>
+    main()
+  File "/home/cassi/projects/geochem_detect/scripts/train_autoencoder.py", line 83, in main
+    df, data_options = load_dataset_frame(
+                       ^^^^^^^^^^^^^^^^^^^
+  File "/home/cassi/projects/geochem_detect/src/geochem_detect/data/loader.py", line 132, in load_dataset_frame
+    data_options["feature_columns"] = resolve_feature_columns(df, data_options)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/cassi/projects/geochem_detect/src/geochem_detect/data/loader.py", line 104, in resolve_feature_columns
+    raise ValueError(f"Configured feature columns not found in data: {missing}")
+ValueError: Configured feature columns not found in data: ['Cu_ppm', 'Ni_ppm', 'Fe_pct', 'Au_ppb', 'Pt_ppb', 'Pd_ppb']
+make: *** [Makefile:59: train-autoencoder] Error 1
+```
+Determine the likely discrepancy and resolve it so the behavior follows train_isolation_forest.py.
+
+Prompt 20
+
+Let's separate data preparation config from model config. The only data config we need for model training is the data path. The rest of the data config (which should remain the same as it currently is constructed) should be in a separate file and used when running the preprocess* make targets.
+
+Prompt 21
+
+This is good, let's add one more consideration. Since the model config no longer contains data.label, we need to add evaluation.label so we know which column to use for determining anomalies if either anomaly_labels or contamination_threshold are specified. Also, please update the readme with instructions for data preprocessing and referencing data for training.
+
+Prompt 22
+
+I think I made one logical mistake. We need to include which feature_columns we want to use for training, as well as which columns are lat/lon/label, as we did before. When we go to train, we want to be sure to follow the config.
+
+Prompt 23
+
+When we run the make preprocess target, we see deprecation warnings. First we see,
+```
+FutureWarning: Downcasting behavior in Series and DataFrame methods 'where', 'mask', and 'clip' is deprecated. In a future version this will not infer object dtypes or cast all-round floats to integers. Instead call result.infer_objects(copy=False) for object inference, or cast round floats explicitly. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+```
+and many warnings similar to,
+```
+df.loc[:, feat_cols] = df[feat_cols].mask(negative_mask, -0.5 * df[feat_cols])
+/home/cassi/projects/geochem_detect/scripts/preprocess_data.py:314: FutureWarning: Setting an item of incompatible dtype is deprecated and will raise in a future error of pandas. Value '[21. 38. 26. ... 15. 13.  9.]' has dtype incompatible with int64, please explicitly cast to a compatible dtype first.
+```
+Suggest and implement changes to the preprocess script to prevent these warnings.
+
+Prompt 24
+
+When I manually plot the preprocessed data for babel-nebo, there seems to be some corruption. For example, the Pd_ppb is the wrong order of magnitude and resolution is in steps of 0.5. This points to possibly a unit conversion issue, and possibly an issue with the normalization step. (When I manually normalize the data and plot it I do not have this problem.) Carefully review the preprocessing script and determine possible origins for the issue and correct it.
+
+Prompt 25
+
+Since we identified that error, let's also sanity check that the scale_features config flag is obeyed as expected.
+
+Prompt 26
+
+I don't think this is the correct fix. We want the scale_features config flag to be obeyed during preprocessing, not at train time. Check that when we run make preprocess that the scale_features flag is followed.
+
+Prompt 27
+
+When running `CONFIG=src/geochem_detect/config/bn_config_isolation_forest_labels.yml make train-iforest` We see,
+
+```
+Spatial anomaly maps skipped: no coordinate columns configured
+```
+Our config does indeed include coordinates, so we should create the spatial map. Figure out where the logical error is and correct it.
+
+Prompt 28
+
+Let's review the predict script and make sure it still works as expected after our config changes. When we pass the model type and split, we should still run against the same feature_columns (including spatial columns if indicated) we specify in the config. Additionally let's make sure the output is a file with the full input data (as in the file in data_path) with both the anomaly scores and the anomaly classification (0 or 1) for that row.
+
+Prompt 29
+
+Let's go through the data pre-processing, training, and prediction scripts and support the use of other names for the latitude/longitude columns. Whatever is specified in the data config should be carried through.
+
+Prompt 30
+
+Let's explicitly consider the preprocess.py, train_*.py, and predict.py scripts. We want to ensure,
+1. Preprocessing is only executed once, when we explicitly call it via make preprocess*
+2. Training and prediction only perform the reshaping and reconstruction necessary to run the particular model, not the data cleaning, normalization, etc done during preprocessing.
+3. If we set training.spatial = true in the config, then we include the spatial coordinates as features in training and in prediction.
+Double check the 3 points above. Identify any potential issues and correct them.
+
+Prompt 31
+
+We want to create a set of unit tests. Consider good targets for unit tests and create a suite using pytest. Create a make target to execute the unit tests. Here are some ideas:
+- Check for required config fields for training each model. Include checks for clean error handling 
+- Using a variety of configs and sample data (or gvirm), check the preprocessor output matches the current output (save it as a source of truth)
+- Pre-train tests: ensure the model accepts the expected data shape
+- Pipeline: run a few data points through one full preprocess / train / predict pipeline and ensure the output of each stage has the expected shape. (Preprocess should match exactly, the others should just match expected files/expected data shape.) Only do this for isolation forest and autoencoder.
+
+Prompt 32
+
+I recreated the virtual environment and attempted to run `make test-unit`. However I encounterede an error,
+```
+________________ ERROR collecting tests/test_pipeline_shapes.py ________________
+ImportError while importing test module '/home/cassi/projects/geochem_detect/tests/test_pipeline_shapes.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.10/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+tests/test_pipeline_shapes.py:5: in <module>
+    import mlflow
+E   ModuleNotFoundError: No module named 'mlflow'
+```
+Double check the pyproject.toml and uv.lock and make sure you haven't accidentally removed required dependencies!
+
+Prompt 33
+
+When running unit tests, we see the following FutureWarning,
+```
+  /home/cassi/projects/geochem_detect/.venv/lib/python3.11/site-packages/mlflow/tracking/_tracking_service/utils.py:184: FutureWarning: The filesystem tracking backend (e.g., './mlruns') is deprecated as of February 2026. Consider transitioning to a database backend (e.g., 'sqlite:///mlflow.db') to take advantage of the latest MLflow features. See https://mlflow.org/docs/latest/self-hosting/migrate-from-file-store for migration guidance.
+    return FileStore(store_uri, store_uri)
+```
+and the following DeprecationWarning,
+```
+tests/test_pipeline_shapes.py: 16 warnings
+  /home/cassi/projects/geochem_detect/.venv/lib/python3.11/site-packages/keras/src/backend/tensorflow/core.py:171: DeprecationWarning: __array__ implementation doesn't accept a copy keyword, so passing copy=False failed. __array__ must implement 'dtype' and 'copy' keyword arguments. To learn more, see the migration guide https://numpy.org/devdocs/numpy_2_0_migration_guide.html#adapting-to-changes-in-the-copy-keyword
+    return np.array(x)
+```
+Attempt to make minimal changes required to remove these warnings.
+
+Prompt 34
+
+Do not remove the warnings by simply catching them as you did now in _save_keras_model and _mlflow_log_keras_model. Try to find a solution that prevents the warning (by using new syntax) or allow the warning to be emitted.
+
+Prompt 35
+
+Let's add the coverage tool to output test coverage when we run unit tests.
+
+Prompt 36
+
+When running `RUN_ID=eee0d7961324477b8f62c852794c1d1a MODEL_TYPE=autoencoder make predict-all` I get unexpected warnings that look like,
+
+```bash
+/home/cassi/projects/geochem_detect/.venv/lib/python3.11/site-packages/keras/src/models/functional.py:258: UserWarning: The structure of `inputs` doesn't match the expected structure.
+Expected: ['chem_input']
+Received: inputs=Tensor(shape=(972, 6))
+  warnings.warn(msg)
+```
+
+Identify a reason for this warning and propose a solution.
+
+Prompt 37
+
+Implement the suggested fix for future runs but it does not need to be backward compatible.
+
+Prompt 38
+
+Take another pass through the readme and update the content to reflect recent changes. Simplify language where appropriate. ONLY change content below the section `# Original README`, do not change anything above.

@@ -13,8 +13,7 @@ data:
     - P2O5n
   longitude: long
   latitude: lat
-  scale_features: true
-  # normalize_by: some_reference_column
+  label: label
 
 sampling:
   # Bounding-box half-width in decimal degrees (window = window_deg × window_deg).
@@ -62,6 +61,7 @@ training:
   test_size: 0.15
 
 evaluation:
+  label: label
   # Classes with fewer than contamination_threshold × N samples are anomalous.
   # Alternatively, specify exact label values directly via anomaly_labels.
   contamination_threshold: 0.001

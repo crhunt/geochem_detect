@@ -1,0 +1,64 @@
+data:
+  data_path: babel-nebo/babel-nebo-lagsample-subset-labels.csv
+  feature_columns:
+    - Mo_ppm
+    - Cu_ppm
+    - Pb_ppm
+    - Zn_ppm
+    - Ag_ppm
+    - Ni_ppm
+    - Co_ppm
+    - Mn_ppm
+    - Fe_pct
+    - As_ppm
+    - U_ppm
+    - Au_ppm
+    - Sr_ppm
+    - Cd_ppm
+    - Sb_ppm
+    - Bi_ppm
+    - V_ppm
+    - Ca_pct
+    - P_pct
+    - La_ppm
+    - Cr_ppm
+    - Mg_pct
+    - Ba_ppm
+    - Al_pct
+    - Na_pct
+    - K_pct
+    - W_ppm
+    - Zr_ppm
+    - Sn_ppm
+    - Y_ppm
+    - Nb_ppm
+    - Be_ppm
+    - Sc_ppm
+    - Au_ppb
+    - Pt_ppb
+    - Pd_ppb
+  longitude: NORTHING
+  latitude: EASTING
+  label: label
+
+# Default hyperparameters for IsolationForestDetector
+# These values are also the class defaults in models/isolation_forest.py
+
+model:
+  n_estimators: 1000
+  # Expected fraction of outliers; used by sklearn to set the decision threshold.
+  contamination: 0.006
+  max_features: 1.0
+  random_state: 42
+  n_jobs: -1
+
+# Fraction of the full dataset used to define "rare" classes for anomaly labelling.
+# A class is flagged as anomalous if its count is below contamination_threshold * N.
+evaluation:
+  label: label
+  #contamination_threshold: 0.05
+  # Alternatively, specify exact label values directly:
+  anomaly_labels: ['Pt_rich', 'Pd_rich', 'Au_rich', 'Fe_Ni_rich',
+       'babel_nebo', 'Cu_rich']
+  # Isolation Forest labels anomalies when decision_function < cutoff.
+  cutoff: 0.0

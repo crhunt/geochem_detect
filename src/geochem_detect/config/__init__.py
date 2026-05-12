@@ -14,6 +14,63 @@ _DEFAULT_CONFIGS: dict[str, Path] = {
     "cnn_sae":          _CONFIG_DIR / "default_config_cnn_sae.yml",
 }
 
+_REQUIRED_CONFIG_FIELDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "isolation_forest": {
+        "data": ("data_path", "feature_columns", "label"),
+        "model": ("n_estimators", "contamination", "max_features", "random_state"),
+    },
+    "autoencoder": {
+        "data": ("data_path", "feature_columns", "label", "longitude", "latitude"),
+        "model": (
+            "encoding_dim",
+            "hidden_dims",
+            "dropout_rate",
+            "learning_rate",
+            "epochs",
+            "batch_size",
+            "validation_split",
+            "patience",
+        ),
+        "training": ("spatial",),
+    },
+    "classifier": {
+        "data": ("data_path", "feature_columns", "label"),
+        "model": (
+            "hidden_dims",
+            "dropout_rate",
+            "learning_rate",
+            "epochs",
+            "batch_size",
+            "validation_split",
+            "patience",
+        ),
+    },
+    "cnn_sae": {
+        "data": ("data_path", "feature_columns", "label", "longitude", "latitude"),
+        "sampling": (
+            "window_deg",
+            "grid_size",
+            "n_samples",
+            "min_points",
+            "anomaly_fraction_threshold",
+            "random_state",
+        ),
+        "model": (
+            "cnn_filters",
+            "cnn_kernel_size",
+            "encoding_dim",
+            "dense_hidden_dims",
+            "dropout_rate",
+            "learning_rate",
+            "sparsity_weight",
+            "epochs",
+            "batch_size",
+            "patience",
+        ),
+        "training": ("val_size", "test_size"),
+    },
+}
+
 
 def load_config(model_type: str, config_path: str | Path | None = None) -> dict:
     """Load a YAML config for *model_type*, falling back to the bundled default.
@@ -51,8 +108,8 @@ def load_config(model_type: str, config_path: str | Path | None = None) -> dict:
             overrides = yaml.safe_load(config_file) or {}
         # Deep-merge: override section by section
         for section, values in overrides.items():
-            if section == "evaluation" and values in (None, {}):
-                cfg[section] = {}
+            if section == "evaluation":
+                cfg[section] = {} if values in (None, {}) else dict(values)
                 continue
             if section in cfg and isinstance(cfg[section], dict):
                 cfg[section].update(values)
@@ -66,6 +123,36 @@ def load_config(model_type: str, config_path: str | Path | None = None) -> dict:
         cfg["model"]["cnn_filters"] = list(cfg["model"]["cnn_filters"])
     if "model" in cfg and "dense_hidden_dims" in cfg["model"]:
         cfg["model"]["dense_hidden_dims"] = list(cfg["model"]["dense_hidden_dims"])
+
+    validate_training_config(model_type, cfg)
+
+    return cfg
+
+
+def validate_training_config(model_type: str, cfg: dict) -> dict:
+    """Validate the minimum config contract required to train *model_type*."""
+    if model_type not in _DEFAULT_CONFIGS:
+        raise ValueError(
+            f"Unknown model_type '{model_type}'. "
+            f"Expected one of {list(_DEFAULT_CONFIGS)}"
+        )
+
+    missing: list[str] = []
+    required_sections = _REQUIRED_CONFIG_FIELDS.get(model_type, {})
+    for section_name, field_names in required_sections.items():
+        section = cfg.get(section_name)
+        if not isinstance(section, dict):
+            missing.append(section_name)
+            continue
+        for field_name in field_names:
+            value = section.get(field_name)
+            if value is None or value == "" or value == []:
+                missing.append(f"{section_name}.{field_name}")
+
+    if missing:
+        raise ValueError(
+            f"Invalid {model_type} training config. Missing required fields: {missing}"
+        )
 
     return cfg
 

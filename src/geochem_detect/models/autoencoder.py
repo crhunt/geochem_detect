@@ -47,7 +47,7 @@ def build_autoencoder(
         y = tf.keras.layers.Dropout(dropout_rate)(y)
     decoded = tf.keras.layers.Dense(n_features, activation="linear", name="decoded")(y)
 
-    inputs = [chem_input] if n_spatial == 0 else [chem_input, spatial_input]
+    inputs = chem_input if n_spatial == 0 else [chem_input, spatial_input]
     model = tf.keras.Model(inputs=inputs, outputs=decoded, name="autoencoder")
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate),
@@ -106,6 +106,12 @@ class AutoencoderDetector:
             return [X_chem, X_spatial]
         return X_chem
 
+    def _predict_reconstruction(
+        self, X_chem: np.ndarray, X_spatial: np.ndarray | None = None
+    ) -> np.ndarray:
+        inputs = self._prepare_inputs(X_chem, X_spatial)
+        return self.model(inputs, training=False).numpy()
+
     def fit(
         self,
         X_chem: np.ndarray,
@@ -146,8 +152,7 @@ class AutoencoderDetector:
         self, X_chem: np.ndarray, X_spatial: np.ndarray | None = None
     ) -> np.ndarray:
         """Mean squared reconstruction error per sample."""
-        inputs = self._prepare_inputs(X_chem, X_spatial)
-        preds = self.model.predict(inputs, verbose=0)
+        preds = self._predict_reconstruction(X_chem, X_spatial)
         return np.mean((X_chem - preds) ** 2, axis=1)
 
     def anomaly_scores(

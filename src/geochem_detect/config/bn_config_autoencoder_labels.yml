@@ -1,18 +1,14 @@
 data:
-  data_path: gvirm/Data1.csv
+  data_path: babel-nebo/babel-nebo-lagsample-subset-labels.csv
   feature_columns:
-    - SiO2n
-    - TiO2n
-    - Al2O3n
-    - FeO*n
-    - MnOn
-    - MgOn
-    - CaOn
-    - Na2On
-    - K2On
-    - P2O5n
-  longitude: long
-  latitude: lat
+    - Cu_ppm
+    - Ni_ppm
+    - Fe_pct
+    - Au_ppb
+    - Pt_ppb
+    - Pd_ppb
+  longitude: NORTHING
+  latitude: EASTING
   label: label
 
 # Default hyperparameters for AutoencoderDetector
@@ -23,20 +19,21 @@ model:
   hidden_dims: [32, 16]
   dropout_rate: 0.2
   learning_rate: 0.001
-  epochs: 50
+  epochs: 100
   batch_size: 64
   validation_split: 0.1   # used only when no explicit val set is provided
   patience: 10
 
 # Whether to include scaled lat/lon as auxiliary inputs to the encoder
 training:
-  spatial: true
+  spatial: false
 
 evaluation:
   label: label
-  contamination_threshold: 0.01
+  #contamination_threshold: 0.01
   # Alternatively, specify exact label values directly:
-  # anomaly_labels: ["label_a", "label_b"]
+  anomaly_labels: ['Pt_rich', 'Pd_rich', 'Au_rich', 'Fe_Ni_rich',
+      'babel_nebo', 'Cu_rich']
   # Score cutoff for flagging anomalies: mean + anomaly_sigma_cutoff * std
   # This is independent of contamination_threshold (which defines ground-truth rare classes).
   anomaly_sigma_cutoff: 2.0

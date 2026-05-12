@@ -1,0 +1,18 @@
+data:
+  data_path: gvirm/multiclass_clean.csv
+  processed_data_path: gvirm/multiclass_clean.csv
+  feature_columns:
+    - SIO2(WT%)
+    - TIO2(WT%)
+    - AL2O3(WT%)
+    - FEOT(WT%)
+    - CAO(WT%)
+    - MGO(WT%)
+    - MNO(WT%)
+    - K2O(WT%)
+    - NA2O(WT%)
+    - P2O5(WT%)
+  scale_features: true
+  label: ROCK1
+  # normalize_by: some_reference_column
+  # identifier: some_source_id_column

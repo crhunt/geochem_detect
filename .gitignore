@@ -18,3 +18,10 @@ mlflow.db
 
 # Generated outputs
 outputs/
+.coverage
+
+# Local concerns
+local/
+assets/
+geochem_detect.code-workspace
+notebooks/

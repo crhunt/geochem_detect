@@ -11,8 +11,7 @@ data:
     - K2O(WT%)
     - NA2O(WT%)
     - P2O5(WT%)
-  scale_features: true
-  # normalize_by: some_reference_column
+  label: label
 
 # Default hyperparameters for GeochemClassifier
 # These values are also the class defaults in models/classifier.py

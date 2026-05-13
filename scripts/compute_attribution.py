@@ -6,9 +6,10 @@ Supports all three geochem_detect anomaly-detection methods:
 The method is detected automatically from the artefacts saved under the run
 directory.  Results are written to ``<run_dir>/attribution/``:
 
-  shap_values.csv       — per-sample SHAP values + anomaly scores
-  shap_summary_plot.png — beeswarm plot (feature value vs. SHAP value)
-  shap_bar_plot.png     — mean |SHAP| per feature bar chart
+  shap_values.csv            — per-sample SHAP values + anomaly scores
+  shap_summary_plot.png      — beeswarm plot (feature value vs. SHAP value)
+  shap_bar_by_anomaly.png    — mean |SHAP| grouped by anomaly/normal label
+  shap_bar_by_label.png      — mean |SHAP| grouped by rock/sample label
 
 Usage
 -----
@@ -18,6 +19,9 @@ uv run python scripts/compute_attribution.py outputs/isolation_forest/<run_id>
 # Limit background clusters and subsample to speed things up:
 uv run python scripts/compute_attribution.py outputs/autoencoder/<run_id> \\
     --max-background 50 --max-samples 500
+
+# Regenerate plots from an existing shap_values.csv (no SHAP recomputation):
+uv run python scripts/compute_attribution.py outputs/isolation_forest/<run_id> --plots-only
 
 # CNN-SAE run:
 uv run python scripts/compute_attribution.py outputs/cnn_sae/<run_id>
@@ -63,15 +67,28 @@ def main() -> None:
             "Default: explain all samples."
         ),
     )
+    parser.add_argument(
+        "--plots-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip SHAP computation and regenerate plots from an existing "
+            "shap_values.csv.  The CSV must already exist under "
+            "<RUN_DIR>/attribution/shap_values.csv."
+        ),
+    )
     args = parser.parse_args()
 
-    from geochem_detect.attribution.explainer import run_attribution
-
-    run_attribution(
-        run_dir=Path(args.run_dir),
-        max_background=args.max_background,
-        max_samples=args.max_samples,
-    )
+    if args.plots_only:
+        from geochem_detect.attribution.explainer import regenerate_plots
+        regenerate_plots(run_dir=Path(args.run_dir))
+    else:
+        from geochem_detect.attribution.explainer import run_attribution
+        run_attribution(
+            run_dir=Path(args.run_dir),
+            max_background=args.max_background,
+            max_samples=args.max_samples,
+        )
 
 
 if __name__ == "__main__":

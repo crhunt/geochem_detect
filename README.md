@@ -93,7 +93,14 @@ uv run python scripts/train_autoencoder.py --config my_configs/ae.yml
 uv run python scripts/train_classifier.py --config my_configs/clf.yml
 ```
 
-### 4. Run predictions
+### 4. View results in MLFlow
+
+```bash
+make mlflow-ui
+# open http://localhost:5000
+```
+
+### 5. Run predictions
 
 After training, use the printed `run_id` or find it in the MLflow UI.
 
@@ -130,14 +137,38 @@ CNN-SAE predictions are written to:
 
 - `outputs/cnn_sae/<run_id>/predictions/predictions_cnn_sae_<split>.csv`
 
-### 5. View results in MLFlow
+### 6. Compute Shapley attributions
+
+After training an anomaly detector (Isolation Forest, Autoencoder, or CNN-SAE), use `compute_attribution.py` to explain which features drive each sample's anomaly score.
+
+The script uses **SHAP KernelExplainer**, which is model-agnostic and works identically for all three methods. For CNN-SAE, window tensors are aggregated to a tabular representation before explanation.
 
 ```bash
-make mlflow-ui
-# open http://localhost:5000
+# Run attribution for any anomaly-detection run
+make attribution RUN_DIR=outputs/isolation_forest/<run_id>
+make attribution RUN_DIR=outputs/autoencoder/<run_id>
+make attribution RUN_DIR=outputs/cnn_sae/<run_id>
+
+# Tune the number of background samples and cap the explained set
+make attribution RUN_DIR=outputs/autoencoder/<run_id> MAX_BACKGROUND=200 MAX_SAMPLES=500
+
+# Call the script directly for full control
+uv run python scripts/compute_attribution.py outputs/isolation_forest/<run_id>
+uv run python scripts/compute_attribution.py outputs/autoencoder/<run_id> \
+    --max-background 200 --max-samples 500
 ```
 
-### 6. Run unit tests
+Outputs are written to `outputs/<method>/<run_id>/attribution/`:
+
+| File | Contents |
+|------|----------|
+| `shap_values.csv` | Per-sample SHAP values, anomaly score, and metadata |
+| `shap_summary_bar.png` | Bar chart of mean absolute SHAP values per feature |
+| `shap_summary_beeswarm.png` | Beeswarm plot showing feature impact distribution |
+
+The `training_config.yml` saved in `artefacts/` is used to reconstruct the exact dataset that was seen during training, so the attribution is always consistent with the model.
+
+### 7. Run unit tests
 
 ```bash
 make test-unit
@@ -300,7 +331,8 @@ scripts/
 ├── train_cnn_sae.py
 ├── train_classifier.py
 ├── predict.py
-└── predict_cnn_sae.py
+├── predict_cnn_sae.py
+└── compute_attribution.py
 ```
 
 ### Run artefacts
@@ -315,6 +347,7 @@ Each training run saves artefacts under `outputs/<model_type>/<run_id>/artefacts
 | `dataset_info.json` | Dataset path, feature columns, label column |
 | `model.pkl` or `keras_model.keras` | Saved model |
 | `anomaly_threshold.json` | Saved anomaly threshold for anomaly detectors |
+| `training_config.yml` | Exact merged config used during training |
 
 CNN-SAE runs additionally save:
 
@@ -345,6 +378,7 @@ Run `make help` to list all targets.  Key targets:
 | `train-all` | Train all four models |
 | `predict-[train\|val\|test\|all\|full]` | Run a trained model (requires `RUN_ID=` `MODEL_TYPE=`) |
 | `predict-cnn-sae-[train\|val\|test\|all\|full]` | Run CNN-SAE predictions (requires `RUN_ID=`) |
+| `attribution` | Compute SHAP attributions (requires `RUN_DIR=`; optional `MAX_BACKGROUND=` `MAX_SAMPLES=`) |
 | `mlflow-ui` | Launch MLFlow UI at `http://localhost:5000` |
 | `lint` / `format` | Run Ruff checks or formatting |
 | `test-unit` | Run unit tests with coverage output |

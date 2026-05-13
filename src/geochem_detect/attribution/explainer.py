@@ -485,9 +485,34 @@ def save_attribution(
     result_df.to_csv(csv_path, index=False)
     print(f"  Saved: {csv_path}")
 
-    # Visualisations
+    # ── Anomaly-grouped bar chart (always) ───────────────────────────────────
+    anomaly_group = np.where(is_anomaly == 1, "Anomalous", "Normal")
+    _plot_grouped_bar(
+        shap_values,
+        feature_names,
+        group_labels=anomaly_group,
+        title="Mean |SHAP| by anomaly label",
+        save_path=out_dir / "shap_bar_by_anomaly.png",
+    )
+
+    # ── Label-grouped bar chart (only when a label column is available) ──────
+    cfg_path = run_dir / "artefacts" / "training_config.yml"
+    if cfg_path.exists():
+        with open(cfg_path, encoding="utf-8") as _f:
+            _saved_cfg = yaml.safe_load(_f)
+        label_col = _saved_cfg.get("data", {}).get("label", "label")
+        if label_col in result_df.columns and result_df[label_col].notna().any():
+            rock_labels = result_df[label_col].fillna("unknown").astype(str).to_numpy()
+            _plot_grouped_bar(
+                shap_values,
+                feature_names,
+                group_labels=rock_labels,
+                title="Mean |SHAP| by sample label",
+                save_path=out_dir / "shap_bar_by_label.png",
+            )
+
+    # ── Beeswarm summary ─────────────────────────────────────────────────────
     _plot_summary(shap_values, X_explain, feature_names, out_dir)
-    _plot_bar(shap_values, feature_names, out_dir)
 
     return out_dir
 
@@ -519,32 +544,58 @@ def _plot_summary(
     print(f"  Saved: {save_path}")
 
 
-def _plot_bar(
+def _plot_grouped_bar(
     shap_values: np.ndarray,
     feature_names: list[str],
-    out_dir: Path,
+    group_labels: np.ndarray,
+    title: str,
+    save_path: Path,
 ) -> None:
-    """Mean |SHAP| bar chart, styled to match the project's existing plots."""
+    """Horizontal grouped bar chart: mean |SHAP| per feature, one bar per group."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    mean_abs = np.abs(shap_values).mean(axis=0)
-    order = np.argsort(mean_abs)[::-1]
+    unique_groups = sorted(set(group_labels), key=str)
+    n_features = len(feature_names)
+    n_groups = len(unique_groups)
 
-    fig, ax = plt.subplots(figsize=(7, max(3, len(feature_names) * 0.5 + 1)))
-    ax.barh(
-        [feature_names[i] for i in order[::-1]],
-        mean_abs[order[::-1]],
-        color="#4C72B0",
-        edgecolor="white",
-        linewidth=0.5,
-    )
+    group_means: dict = {}
+    for g in unique_groups:
+        mask = group_labels == g
+        group_means[g] = (
+            np.abs(shap_values[mask]).mean(axis=0) if mask.any() else np.zeros(n_features)
+        )
+
+    # Sort features by overall mean |SHAP|; ascending so highest lands at the top
+    order = np.argsort(np.abs(shap_values).mean(axis=0))
+
+    bar_height = 0.8 / n_groups
+    fig_height = max(4, n_features * max(0.45 * n_groups, 0.5) + 1.5)
+    fig, ax = plt.subplots(figsize=(8, fig_height))
+
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    y_base = np.arange(n_features, dtype=float)
+
+    for g_idx, g in enumerate(unique_groups):
+        offsets = y_base + (g_idx - (n_groups - 1) / 2.0) * bar_height
+        ax.barh(
+            offsets,
+            group_means[g][order],
+            height=bar_height,
+            label=str(g),
+            color=colors[g_idx % len(colors)],
+            edgecolor="white",
+            linewidth=0.5,
+        )
+
+    ax.set_yticks(y_base)
+    ax.set_yticklabels([feature_names[i] for i in order])
     ax.set_xlabel("Mean |SHAP value|")
-    ax.set_title("Feature Attribution (mean |SHAP|)")
+    ax.set_title(title)
     ax.spines[["top", "right"]].set_visible(False)
+    ax.legend(loc="lower right", fontsize="small")
     plt.tight_layout()
-    save_path = out_dir / "shap_bar_plot.png"
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close("all")
     print(f"  Saved: {save_path}")
@@ -634,4 +685,84 @@ def run_attribution(
         expected_value=expected_value,
     )
     print(f"[attribution] Done. Results in {out_dir}")
+    return out_dir
+
+
+def regenerate_plots(run_dir: Path) -> Path:
+    """Regenerate attribution plots from a previously saved ``shap_values.csv``.
+
+    Reads ``<run_dir>/attribution/shap_values.csv``, reconstructs the SHAP
+    value matrix and group labels, then overwrites the plot files in-place.
+    The CSV itself is not modified.
+
+    Parameters
+    ----------
+    run_dir:
+        Path to the run directory, e.g. ``outputs/isolation_forest/<run_id>``.
+
+    Returns
+    -------
+    Path to the ``attribution/`` output directory.
+    """
+    run_dir = Path(run_dir).resolve()
+    csv_path = run_dir / "attribution" / "shap_values.csv"
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"No shap_values.csv found at {csv_path}.\n"
+            "Run 'make attribution' first to compute SHAP values."
+        )
+
+    print(f"[attribution] Loading {csv_path} …")
+    df = pd.read_csv(csv_path)
+
+    # Recover feature names from 'shap_<feature>' columns
+    shap_cols = [c for c in df.columns if c.startswith("shap_")]
+    if not shap_cols:
+        raise ValueError("shap_values.csv contains no 'shap_*' columns.")
+    feature_names = [c[len("shap_"):] for c in shap_cols]
+    shap_values = df[shap_cols].to_numpy(dtype=np.float32)
+    X_explain = df[feature_names].to_numpy(dtype=np.float32) if all(
+        f in df.columns for f in feature_names
+    ) else shap_values  # fallback: use SHAP values as proxy for feature values
+
+    out_dir = csv_path.parent
+
+    # ── Anomaly-grouped bar chart ─────────────────────────────────────────────
+    if "is_anomaly" in df.columns:
+        anomaly_group = np.where(df["is_anomaly"].to_numpy() == 1, "Anomalous", "Normal")
+    else:
+        anomaly_score = df["anomaly_score"].to_numpy() if "anomaly_score" in df.columns else None
+        if anomaly_score is not None:
+            threshold = float(np.mean(anomaly_score) + 2.0 * np.std(anomaly_score))
+            anomaly_group = np.where(anomaly_score >= threshold, "Anomalous", "Normal")
+        else:
+            anomaly_group = np.array(["Unknown"] * len(df))
+    _plot_grouped_bar(
+        shap_values,
+        feature_names,
+        group_labels=anomaly_group,
+        title="Mean |SHAP| by anomaly label",
+        save_path=out_dir / "shap_bar_by_anomaly.png",
+    )
+
+    # ── Label-grouped bar chart ───────────────────────────────────────────────
+    cfg_path = run_dir / "artefacts" / "training_config.yml"
+    if cfg_path.exists():
+        with open(cfg_path, encoding="utf-8") as _f:
+            _saved_cfg = yaml.safe_load(_f)
+        label_col = _saved_cfg.get("data", {}).get("label", "label")
+        if label_col in df.columns and df[label_col].notna().any():
+            rock_labels = df[label_col].fillna("unknown").astype(str).to_numpy()
+            _plot_grouped_bar(
+                shap_values,
+                feature_names,
+                group_labels=rock_labels,
+                title="Mean |SHAP| by sample label",
+                save_path=out_dir / "shap_bar_by_label.png",
+            )
+
+    # ── Beeswarm summary ─────────────────────────────────────────────────────
+    _plot_summary(shap_values, X_explain, feature_names, out_dir)
+
+    print(f"[attribution] Plots regenerated in {out_dir}")
     return out_dir

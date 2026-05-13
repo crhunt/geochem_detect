@@ -10,18 +10,21 @@ DATA_PATH  ?=
 LAT_COL    ?=
 LON_COL    ?=
 
+# Attribution defaults — override on the command line:
+#   make attribution RUN_DIR=outputs/isolation_forest/<run_id>
+#   make attribution RUN_DIR=outputs/autoencoder/<run_id> MAX_BACKGROUND=200 MAX_SAMPLES=500
+RUN_DIR        ?= $(error RUN_DIR is required for attribution targets, e.g. make attribution RUN_DIR=outputs/<method>/<run_id>)
+MAX_BACKGROUND ?=
+MAX_SAMPLES    ?=
+
 .DEFAULT_GOAL := help
 
 .PHONY: help venv install preprocess preprocess-spatial preprocess-all \
-        train-iforest train-autoencoder train-classifier train-cnn-sae train-all \
-        predict-train predict-val predict-test predict-all predict-full \
-        predict-cnn-sae-train predict-cnn-sae-val predict-cnn-sae-test \
-        predict-cnn-sae-all predict-cnn-sae-full \
-	lint format test-unit \
-        mlflow-ui \
-        clean clean-outputs clean-processed clean-pycache
-
-# ─── Help ────────────────────────────────────────────────────────────────────
+		train-iforest train-autoencoder train-classifier train-cnn-sae train-all \
+		predict-train predict-val predict-test predict-all predict-full \
+		predict-cnn-sae-train predict-cnn-sae-val predict-cnn-sae-test \
+		predict-cnn-sae-all predict-cnn-sae-full \
+        attribution attribution-plots
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -97,7 +100,26 @@ predict-cnn-sae-full: ## Run CNN-SAE on a fresh set of windows      (RUN_ID= [DA
 	$(PYTHON) scripts/predict_cnn_sae.py --run-id $(RUN_ID) --split full \
 	  $(if $(DATA_PATH),--data-path $(DATA_PATH),)
 
-# ─── Code quality ────────────────────────────────────────────────────────────
+# ─── Attribution (Shapley values) ────────────────────────────────────────────
+# Compute model-agnostic SHAP feature attributions for any trained anomaly detector.
+# Required: RUN_DIR=outputs/<method>/<run_id>   (isolation_forest, autoencoder, or cnn_sae)
+# Optional: MAX_BACKGROUND=<n>   number of background samples for KernelExplainer (default 100)
+#           MAX_SAMPLES=<n>      cap on explained samples (default: all)
+# Output: outputs/<method>/<run_id>/attribution/
+#           shap_values.csv, shap_summary_bar.png, shap_summary_beeswarm.png
+# Example:
+#   make attribution RUN_DIR=outputs/isolation_forest/abc123
+#   make attribution RUN_DIR=outputs/autoencoder/abc123 MAX_BACKGROUND=200 MAX_SAMPLES=500
+
+attribution: ## Compute SHAP attributions for a trained anomaly detector  (RUN_DIR= [MAX_BACKGROUND=] [MAX_SAMPLES=])
+	$(PYTHON) scripts/compute_attribution.py $(RUN_DIR) \
+	  $(if $(MAX_BACKGROUND),--max-background $(MAX_BACKGROUND),) \
+	  $(if $(MAX_SAMPLES),--max-samples $(MAX_SAMPLES),)
+
+attribution-plots: ## Regenerate attribution plots from an existing shap_values.csv  (RUN_DIR=)
+	$(PYTHON) scripts/compute_attribution.py $(RUN_DIR) --plots-only
+
+# ─── Code quality ────────────────────────────────────────────
 lint: ## Lint source and scripts with ruff
 	uv run ruff check src/ scripts/
 

@@ -5,3 +5,18 @@ The next task is a new feature: to compute Shapley values in a model-agnostic wa
 Promt 2
 
 Let's examine the artefacts that get created when training a model. We want to ensure that we save a copy of the exact config that is actually used for model training (ie those under src/geochem_dtect/config) under artefacts. And make sure that any function that uses the artefacts to recreate the training dataset (ie for prediction or for attribution), uses the exact config. Code changes required to do this do not need to be backward compatible.
+
+Prompt 3
+
+Add new make targets for executing the Shapley values calculation. Update the readme to include this new feature.
+
+Prompt 4
+
+Let's refine how we visualize the attribution results. Instead of a single bar plot, let's create 2 grouped bar plots:
+1. A grouped bar plot that distinguishes points by whether they've been labeled anomalous
+2. A grouped bar plot that distinguishes points by which label they have (ie by label column)
+Note that the 2nd grouped bar plot should only be generated if a label column is present (as determined by the dataset_info in the artefacts).
+
+Prompt 5
+
+Let's change the attribution code to support regenerating plots from the shap_values.csv file without requiring recalculating the values. Add make targets to support this as well.

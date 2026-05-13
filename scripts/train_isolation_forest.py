@@ -82,6 +82,11 @@ def main() -> None:
     )
     feat_cols = data_options["feature_columns"]
     X_all = df[feat_cols].to_numpy(dtype=np.float32)
+
+    # Stamp the resolved absolute path and actual feature columns back into cfg
+    # so the saved training_config.yml is fully self-contained.
+    cfg["data"]["data_path"] = data_options["data_path"]
+    cfg["data"]["feature_columns"] = feat_cols
     label_available = data_options["label_col"] in df.columns
     if labels_required and not label_available:
         raise ValueError(
@@ -117,6 +122,7 @@ def main() -> None:
         params=params,
         evaluation=ep,
         run_name="multiclass_clean",
+        cfg=cfg,
     )
 
     out_dir = OUTPUT_ROOT / "isolation_forest" / run_id

@@ -33,6 +33,7 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 OUTPUT_ROOT = Path(__file__).parents[1] / "outputs"
 
@@ -50,6 +51,8 @@ def _load_artefacts(run_id: str) -> dict:
     le     = pickle.loads((art / "label_encoder.pkl").read_bytes())
     with open(art / "dataset_info.json") as f:
         info = json.load(f)
+    with open(art / "training_config.yml", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
     with open(art / "anomaly_threshold.json") as f:
         threshold_cfg = json.load(f)
     with open(art / "sampling_params.json") as f:
@@ -58,7 +61,7 @@ def _load_artefacts(run_id: str) -> dict:
         metadata = json.load(f)
     splits = np.load(art / "window_splits.npz")
     return dict(
-        scaler=scaler, le=le, info=info,
+        scaler=scaler, le=le, info=info, cfg=cfg,
         threshold_cfg=threshold_cfg, sampling_params=sp,
         metadata=metadata, splits=splits, art_dir=art,
     )
@@ -72,24 +75,22 @@ def _load_keras_model(run_id: str):
     return tf.keras.models.load_model(str(keras_path), compile=False)
 
 
-def _load_source_data(info: dict, data_path: str | None):
+def _load_source_data(cfg: dict, data_path: str | None):
     """Load the processed source GeoDataFrame and rebuild only model inputs."""
     from sklearn.preprocessing import LabelEncoder
 
     from geochem_detect.data.loader import load_spatial_frame
 
-    data_cfg = {
-        "data_path": data_path or info["dataset"],
-        "feature_columns": info["feature_cols"],
-        "longitude": info.get("longitude"),
-        "latitude": info.get("latitude"),
-        "normalize_by": info.get("normalize_by"),
-        "scale_features": info.get("scale_features", True),
-    }
+    data_cfg = dict(cfg["data"])
+    if data_path is not None:
+        data_cfg["data_path"] = data_path
+    default_path = data_cfg["data_path"]
+    label_col = data_cfg.get("label", "label")
+
     gdf, data_options = load_spatial_frame(
         data_cfg,
-        info["dataset"],
-        label_col=info.get("label_col", "label"),
+        default_path,
+        label_col=label_col,
     )
     feat_cols = data_options["feature_columns"]
     missing = [column_name for column_name in feat_cols if column_name not in gdf.columns]
@@ -282,7 +283,7 @@ def main() -> None:
     splits        = art["splits"]
     threshold_cfg = art["threshold_cfg"]
     sigma_cutoff  = float(threshold_cfg.get("sigma_cutoff", 2.0))
-    contamination = threshold_cfg.get("contamination_threshold", 0.05)
+    contamination = art["cfg"]["evaluation"].get("contamination_threshold", 0.05)
     # Calibrated val threshold persisted at training time; None for old runs.
     threshold_val = threshold_cfg.get("threshold", None)
     if threshold_val is not None:
@@ -291,10 +292,10 @@ def main() -> None:
         print("  [warn] No calibrated threshold in anomaly_threshold.json; "
               "falling back to sigma-based computation per split.  "
               "Re-train to persist the val-calibrated threshold.")
-    feat_cols  = info["feature_cols"]
+    feat_cols  = art["cfg"]["data"]["feature_columns"]
     n_features = len(feat_cols)
 
-    gdf_clean, X_raw, y_raw, class_names, _ = _load_source_data(info, args.data_path)
+    gdf_clean, X_raw, y_raw, class_names, _ = _load_source_data(art["cfg"], args.data_path)
 
     if args.split == "full":
         print("Generating new windows from source data...")

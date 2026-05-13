@@ -139,6 +139,20 @@ def test_isolation_forest_pipeline_preserves_expected_shapes(
         evaluation=None,
         experiment_name="pytest_isolation_forest",
         run_name="pytest_isolation_forest",
+        cfg={
+            "data": {
+                "data_path": str(processed_path),
+                "feature_columns": list(data_options["feature_columns"]),
+                "label": data_options["label_col"],
+                "longitude": data_options["longitude"],
+                "latitude": data_options["latitude"],
+                "normalize_by": None,
+                "scale_features": False,
+            },
+            "model": {},
+            "training": {"spatial": False},
+            "evaluation": {},
+        },
     )
 
     assert pr_auc is None
@@ -147,7 +161,7 @@ def test_isolation_forest_pipeline_preserves_expected_shapes(
     art = predict_script._load_artefacts(run_id, "isolation_forest")
     model = predict_script._load_model(run_id, "isolation_forest")
     df_input, X_chem, X_spatial, y_true = predict_script._load_data(
-        art["info"],
+        art["cfg"],
         None,
         require_label=True,
     )
@@ -253,6 +267,20 @@ def test_autoencoder_pipeline_preserves_expected_shapes(
         evaluation=None,
         experiment_name="pytest_autoencoder",
         run_name="pytest_autoencoder",
+        cfg={
+            "data": {
+                "data_path": str(processed_path),
+                "feature_columns": list(data_options["feature_columns"]),
+                "label": data_options["label_col"],
+                "longitude": data_options["longitude"],
+                "latitude": data_options["latitude"],
+                "normalize_by": None,
+                "scale_features": False,
+            },
+            "model": {},
+            "training": {"spatial": True},
+            "evaluation": {},
+        },
     )
 
     assert pr_auc is None
@@ -261,7 +289,7 @@ def test_autoencoder_pipeline_preserves_expected_shapes(
     art = predict_script._load_artefacts(run_id, "autoencoder")
     model = detector.model
     df_input, X_chem, X_spatial_loaded, y_true = predict_script._load_data(
-        art["info"],
+        art["cfg"],
         None,
         require_label=True,
     )

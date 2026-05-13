@@ -88,6 +88,8 @@ def main() -> None:
     # CLI spatial flag takes precedence over config
     use_spatial = tp.get("spatial", False) if args.spatial is None else args.spatial
     tp["spatial"] = use_spatial
+    # Propagate the resolved CLI override back into cfg so it is saved correctly.
+    cfg["training"]["spatial"] = use_spatial
 
     df, data_options = load_dataset_frame(
         data_cfg,
@@ -96,6 +98,11 @@ def main() -> None:
         label_col=label_col,
     )
     feat_cols = data_options["feature_columns"]
+
+    # Stamp the resolved absolute path and actual feature columns back into cfg
+    # so the saved training_config.yml is fully self-contained.
+    cfg["data"]["data_path"] = data_options["data_path"]
+    cfg["data"]["feature_columns"] = feat_cols
 
     X_all = df[feat_cols].to_numpy(dtype=np.float32)
     label_available = data_options["label_col"] in df.columns
@@ -164,6 +171,7 @@ def main() -> None:
         params=params,
         evaluation=ep,
         run_name="data1_spatial" if use_spatial else "data1_chem_only",
+        cfg=cfg,
     )
 
     out_dir = OUTPUT_ROOT / "autoencoder" / run_id

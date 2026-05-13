@@ -109,6 +109,11 @@ def main() -> None:
     )
     feat_cols = data_options["feature_columns"]
 
+    # Stamp the resolved absolute path and actual feature columns back into cfg
+    # so the saved training_config.yml is fully self-contained.
+    cfg["data"]["data_path"] = data_options["data_path"]
+    cfg["data"]["feature_columns"] = feat_cols
+
     X_raw = gdf[feat_cols].to_numpy(dtype=np.float32)
     label_available = data_options["label_col"] in gdf.columns
     if labels_required and not label_available:
@@ -149,6 +154,7 @@ def main() -> None:
         evaluation=ep,
         experiment_name=args.experiment,
         run_name=args.run_name or "data1_cnn_sae",
+        cfg=cfg,
     )
 
     # ── Post-training plots ──────────────────────────────────────────────────

@@ -6,6 +6,8 @@ import pickle
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 import mlflow
 import numpy as np
 
@@ -87,6 +89,7 @@ def _save_run_artefacts(
     dataset_info: dict,
     model_obj=None,
     model_type: str = "",
+    cfg: dict | None = None,
 ) -> Path:
     """Persist scaler, label encoder, split indices, and dataset metadata to disk.
 
@@ -112,6 +115,10 @@ def _save_run_artefacts(
     if model_obj is not None:
         (out / "model.pkl").write_bytes(pickle.dumps(model_obj))
 
+    if cfg is not None:
+        with open(out / "training_config.yml", "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
     # Log artefacts folder into MLFlow as well
     mlflow.log_artifacts(str(out), artifact_path="run_artefacts")
     return out
@@ -133,6 +140,7 @@ def train_isolation_forest(
     evaluation: dict | None = None,
     experiment_name: str = "isolation_forest",
     run_name: str | None = None,
+    cfg: dict | None = None,
 ) -> tuple[Any, float | None, str]:
     """Train an Isolation Forest and log to MLFlow.
 
@@ -193,6 +201,7 @@ def train_isolation_forest(
             dataset_info=dataset_info,
             model_obj=det._model,
             model_type="isolation_forest",
+            cfg=cfg,
         )
         with open(art_dir / "anomaly_threshold.json", "w") as f:
             json.dump({"cutoff": cutoff}, f, indent=2)
@@ -215,6 +224,7 @@ def train_autoencoder(
     evaluation: dict | None = None,
     experiment_name: str = "autoencoder",
     run_name: str | None = None,
+    cfg: dict | None = None,
 ) -> tuple[Any, float | None, str]:
     """Train the autoencoder anomaly detector and log to MLFlow.
 
@@ -278,6 +288,7 @@ def train_autoencoder(
             splits=splits,
             dataset_info=dataset_info,
             model_type="autoencoder",
+            cfg=cfg,
         )
         if sigma_cutoff is not None:
             # Persist sigma_cutoff so predict.py can apply the same threshold rule
@@ -303,6 +314,7 @@ def train_classifier(
     params: dict | None = None,
     experiment_name: str = "classifier",
     run_name: str | None = None,
+    cfg: dict | None = None,
 ) -> tuple[Any, float, str]:
     """Train the multi-class classifier and log to MLFlow.
 
@@ -352,6 +364,7 @@ def train_classifier(
             splits=splits,
             dataset_info=dataset_info,
             model_type="classifier",
+            cfg=cfg,
         )
         keras_path = OUTPUT_ROOT / "classifier" / run_id / "artefacts" / "keras_model.keras"
         _save_keras_model(clf.model, keras_path)
@@ -374,6 +387,7 @@ def train_cnn_sae(
     evaluation: dict | None = None,
     experiment_name: str = "cnn_sae",
     run_name: str | None = None,
+    cfg: dict | None = None,
 ) -> tuple[Any, float | None, str]:
     """Train the CNN-SAE spatial anomaly detector and log to MLFlow.
 
@@ -522,6 +536,10 @@ def train_cnn_sae(
 
         with open(art_dir / "dataset_info.json", "w") as f:
             json.dump(dataset_info, f, indent=2)
+
+        if cfg is not None:
+            with open(art_dir / "training_config.yml", "w", encoding="utf-8") as f:
+                yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
 
         if sigma_cutoff is not None:
             with open(art_dir / "anomaly_threshold.json", "w") as f:

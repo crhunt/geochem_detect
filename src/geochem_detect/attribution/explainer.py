@@ -18,6 +18,7 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
+import yaml
 
 
 # ─── Method detection ────────────────────────────────────────────────────────
@@ -56,11 +57,14 @@ def load_artefacts(run_dir: Path, method: str) -> dict:
         info = json.load(f)
     with open(art / "anomaly_threshold.json") as f:
         threshold_cfg = json.load(f)
+    with open(art / "training_config.yml", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
 
     result: dict = dict(
         scaler=scaler,
         le=le,
         info=info,
+        cfg=cfg,
         threshold_cfg=threshold_cfg,
         art_dir=art,
         method=method,
@@ -131,7 +135,8 @@ def build_tabular_data(
     """
     info = artefacts["info"]
     scaler = artefacts["scaler"]
-    feat_cols: list[str] = info["feature_cols"]
+    cfg = artefacts["cfg"]
+    feat_cols: list[str] = cfg["data"]["feature_columns"]
 
     if method == "cnn_sae":
         return _build_cnn_sae_tabular(run_dir, artefacts, feat_cols)
@@ -139,19 +144,13 @@ def build_tabular_data(
     # ── Tabular models (isolation_forest, autoencoder) ────────────────────────
     from geochem_detect.data.loader import load_dataset_frame
 
-    data_cfg = {
-        "data_path": info["dataset"],
-        "feature_columns": feat_cols,
-        "longitude": info.get("longitude"),
-        "latitude": info.get("latitude"),
-        "normalize_by": info.get("normalize_by"),
-        "scale_features": info.get("scale_features", True),
-    }
+    data_cfg = dict(cfg["data"])
+    label_col = data_cfg.get("label", "label")
     df, data_options = load_dataset_frame(
         data_cfg,
-        info["dataset"],
+        data_cfg["data_path"],
         require_label=False,
-        label_col=info.get("label_col", "label"),
+        label_col=label_col,
     )
     df = df.reset_index(drop=True)
     actual_feat_cols: list[str] = data_options["feature_columns"]
@@ -166,20 +165,20 @@ def build_tabular_data(
 
     feature_names = list(actual_feat_cols)
 
-    if info.get("spatial", False):
+    if cfg.get("training", {}).get("spatial", False):
         lat_col, lon_col = _resolve_coord_cols(
-            df_all, info.get("latitude"), info.get("longitude")
+            df_all, data_cfg.get("latitude"), data_cfg.get("longitude")
         )
         X_spatial = df_all[[lat_col, lon_col]].to_numpy(dtype=np.float32)
         X_scaled = np.concatenate([X_scaled, X_spatial], axis=1)
         feature_names = feature_names + [lat_col, lon_col]
 
-    label_col = info.get("label_col", "label")
+    actual_label_col = data_options["label_col"]
     y: np.ndarray | None = None
-    if label_col in df_all.columns:
+    if actual_label_col in df_all.columns:
         le = artefacts["le"]
         try:
-            y = le.transform(df_all[label_col].fillna("").astype(str))
+            y = le.transform(df_all[actual_label_col].fillna("").astype(str))
         except Exception:
             # label values may not match encoder classes — ignore
             y = None
@@ -189,8 +188,6 @@ def build_tabular_data(
     meta_df.insert(0, "original_row_idx", idx_all)
 
     return X_scaled, y, feature_names, meta_df
-
-
 def _concat_all_splits(splits) -> np.ndarray:
     """Concatenate train/val/test indices from a splits.npz file."""
     parts = []
@@ -208,27 +205,20 @@ def _build_cnn_sae_tabular(
     feat_cols: list[str],
 ) -> tuple[np.ndarray, np.ndarray | None, list[str], pd.DataFrame]:
     """Build tabular data for CNN-SAE by aggregating windows."""
-    info = artefacts["info"]
+    cfg = artefacts["cfg"]
     scaler = artefacts["scaler"]
     sp = artefacts["sampling_params"]
     metadata: list[dict] = artefacts["window_metadata"]
     splits = artefacts["splits"]
 
     from geochem_detect.data.loader import load_spatial_frame
-    from geochem_detect.data.spatial_sampler import SpatialSampler
 
-    data_cfg = {
-        "data_path": info["dataset"],
-        "feature_columns": feat_cols,
-        "longitude": info.get("longitude"),
-        "latitude": info.get("latitude"),
-        "normalize_by": info.get("normalize_by"),
-        "scale_features": info.get("scale_features", True),
-    }
+    data_cfg = dict(cfg["data"])
+    label_col = data_cfg.get("label", "label")
     gdf, data_options = load_spatial_frame(
         data_cfg,
-        info["dataset"],
-        label_col=info.get("label_col", "label"),
+        data_cfg["data_path"],
+        label_col=label_col,
     )
     actual_feat_cols: list[str] = data_options["feature_columns"]
     gdf = gdf.reset_index(drop=True)

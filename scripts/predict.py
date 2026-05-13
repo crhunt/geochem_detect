@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 
 OUTPUT_ROOT = Path(__file__).parents[1] / "outputs"
 _LEGACY_COORDINATE_CANDIDATES = [
@@ -53,7 +54,9 @@ def _load_artefacts(run_id: str, model_type: str) -> dict:
     splits = np.load(art / "splits.npz")
     with open(art / "dataset_info.json") as f:
         info = json.load(f)
-    return dict(scaler=scaler, le=le, splits=splits, info=info, art_dir=art)
+    with open(art / "training_config.yml", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    return dict(scaler=scaler, le=le, splits=splits, info=info, cfg=cfg, art_dir=art)
 
 
 def _load_model(run_id: str, model_type: str):
@@ -68,7 +71,7 @@ def _load_model(run_id: str, model_type: str):
 
 
 def _load_data(
-    info: dict,
+    cfg: dict,
     data_path: str | None,
     *,
     require_label: bool,
@@ -76,24 +79,22 @@ def _load_data(
     """Load the prediction dataset and rebuild only the model input tensors."""
     from geochem_detect.data.loader import load_dataset_frame
 
-    data_cfg = {
-        "data_path": data_path or info["dataset"],
-        "feature_columns": info["feature_cols"],
-        "longitude": info.get("longitude"),
-        "latitude": info.get("latitude"),
-        "normalize_by": info.get("normalize_by"),
-        "scale_features": info.get("scale_features", True),
-    }
+    data_cfg = dict(cfg["data"])
+    if data_path is not None:
+        data_cfg["data_path"] = data_path
+    default_path = data_cfg["data_path"]
+    label_col = data_cfg.get("label", "label")
+
     df, data_options = load_dataset_frame(
         data_cfg,
-        info["dataset"],
+        default_path,
         require_label=require_label,
-        label_col=info.get("label_col", "label"),
+        label_col=label_col,
     )
-    label_col = data_options["label_col"]
-    if label_col in df.columns:
+    actual_label_col = data_options["label_col"]
+    if actual_label_col in df.columns:
         df = df.copy()
-        df[label_col] = df[label_col].astype("string").str.strip()
+        df[actual_label_col] = df[actual_label_col].astype("string").str.strip()
     feat_cols = data_options["feature_columns"]
     missing = [column_name for column_name in feat_cols if column_name not in df.columns]
     if missing:
@@ -107,7 +108,7 @@ def _load_data(
     df_clean = df.reset_index(drop=True)
     X_chem = df_clean[feat_cols].to_numpy(dtype=np.float32)
     X_spatial = None
-    if info.get("spatial", False):
+    if cfg.get("training", {}).get("spatial", False):
         latitude, longitude = _resolve_spatial_columns(
             df_clean,
             data_options.get("latitude"),
@@ -116,8 +117,8 @@ def _load_data(
         X_spatial = df_clean[[latitude, longitude]].to_numpy(dtype=np.float32)
 
     y_true = None
-    if label_col in df_clean.columns:
-        y_true = df_clean[label_col].fillna("").astype(str).to_numpy(dtype=object)
+    if actual_label_col in df_clean.columns:
+        y_true = df_clean[actual_label_col].fillna("").astype(str).to_numpy(dtype=object)
 
     return df_clean.reset_index(drop=True), X_chem, X_spatial, y_true
 
@@ -281,7 +282,7 @@ def main() -> None:
     )
 
     df_input, X_chem, X_spatial, y_true = _load_data(
-        info,
+        art["cfg"],
         args.data_path,
         require_label=require_label,
     )
@@ -290,7 +291,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nRun ID   : {args.run_id}")
     print(f"Model    : {args.model_type}")
-    print(f"Dataset  : {args.data_path or info['dataset']}  ({len(X_chem)} rows)")
+    print(f"Dataset  : {args.data_path or art['cfg']['data']['data_path']}  ({len(X_chem)} rows)")
     print(f"Output   : {out_dir}\n")
 
     if args.split == "full":

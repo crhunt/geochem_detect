@@ -1,3 +1,7 @@
 Prompt 1
 
 The next task is a new feature: to compute Shapley values in a model-agnostic way that we can apply to the 3 anomaly detection methods in this package. The goal is to understand which features (ie, which element or oxide depending on the dataset) are responsible for a sample being categorized as anomalous. Create a plan for implementing this feature, including deciding which Shapley python library to use, prioritizing a single approach that can be used with all 3 anomaly detection methods. The input should be the path to the model information under `/outputs/<method>/<run id>`. The output should include both a table (as csv) and relevant visualizations under a new folder `attribution` in the same path.
+
+Promt 2
+
+Let's examine the artefacts that get created when training a model. We want to ensure that we save a copy of the exact config that is actually used for model training (ie those under src/geochem_dtect/config) under artefacts. And make sure that any function that uses the artefacts to recreate the training dataset (ie for prediction or for attribution), uses the exact config. Code changes required to do this do not need to be backward compatible.

@@ -59,6 +59,11 @@ def main() -> None:
     df, data_options = load_dataset_frame(data_cfg, DEFAULT_MULTICLASS_DATA)
     feat_cols = data_options["feature_columns"]
     X_all = df[feat_cols].to_numpy(dtype=np.float32)
+
+    # Stamp the resolved absolute path and actual feature columns back into cfg
+    # so the saved training_config.yml is fully self-contained.
+    cfg["data"]["data_path"] = data_options["data_path"]
+    cfg["data"]["feature_columns"] = feat_cols
     le = LabelEncoder()
     y_raw = le.fit_transform(df[data_options["label_col"]].values)
     class_names = le.classes_
@@ -82,6 +87,7 @@ def main() -> None:
         X_all, y_raw, splits, le, scaler, dataset_info,
         params=params,
         run_name="multiclass_clean",
+        cfg=cfg,
     )
 
     out_dir = OUTPUT_ROOT / "classifier" / run_id
